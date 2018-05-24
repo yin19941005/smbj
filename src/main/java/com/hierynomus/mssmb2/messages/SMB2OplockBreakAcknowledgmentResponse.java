@@ -7,6 +7,9 @@ import com.hierynomus.protocol.commons.EnumWithValue;
 import com.hierynomus.protocol.commons.buffer.Buffer;
 import com.hierynomus.smb.SMBBuffer;
 
+/***
+ * [MS-SMB2].pdf 2.2.25 SMB2 OPLOCK_BREAK Response
+ */
 public class SMB2OplockBreakAcknowledgmentResponse extends SMB2Packet {
 
     private SMB2OplockLevel oplockLevel;

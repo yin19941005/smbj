@@ -25,9 +25,9 @@ public enum SMB2OplockLevel implements EnumWithValue<SMB2OplockLevel> {
     SMB2_OPLOCK_LEVEL_NONE(0x00L),
     SMB2_OPLOCK_LEVEL_II(0x01L),
     SMB2_OPLOCK_LEVEL_EXCLUSIVE(0x08L),
-    SMB2_OPLOCK_LEVEL_BATCH(0x09L);
+    SMB2_OPLOCK_LEVEL_BATCH(0x09L),
     // TODO: implement and support using lease
-//    OPLOCK_LEVEL_LEASE(0xFFL);
+    OPLOCK_LEVEL_LEASE(0xFFL);
 
     private long value;
 
