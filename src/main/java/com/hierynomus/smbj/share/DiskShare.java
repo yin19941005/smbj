@@ -35,6 +35,7 @@ import com.hierynomus.smbj.SMBClient;
 import com.hierynomus.smbj.common.SMBRuntimeException;
 import com.hierynomus.smbj.common.SmbPath;
 import com.hierynomus.smbj.connection.Connection;
+import com.hierynomus.smbj.event.SMBEventBus;
 import com.hierynomus.smbj.paths.PathResolveException;
 import com.hierynomus.smbj.paths.PathResolver;
 import com.hierynomus.smbj.session.Session;
@@ -59,15 +60,17 @@ import static java.util.EnumSet.noneOf;
 
 public class DiskShare extends Share {
     private final PathResolver resolver;
+    private SMBEventBus bus;
 
-    public DiskShare(SmbPath smbPath, TreeConnect treeConnect, PathResolver pathResolver) {
+    public DiskShare(SmbPath smbPath, TreeConnect treeConnect, PathResolver pathResolver, SMBEventBus bus) {
         super(smbPath, treeConnect);
         this.resolver = pathResolver;
+        this.bus = bus;
     }
 
-    public DiskEntry open(String path, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+    public DiskEntry open(String path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
         SmbPath pathAndFile = new SmbPath(smbPath, path);
-        SMB2CreateResponseContext response = createFileAndResolve(pathAndFile, null, accessMask, attributes, shareAccesses, createDisposition, createOptions);
+        SMB2CreateResponseContext response = createFileAndResolve(pathAndFile, oplockLevel, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions);
         return getDiskEntry(path, response);
     }
 
@@ -76,8 +79,8 @@ public class DiskShare extends Share {
         return resolver.handledStates();
     }
 
-    private SMB2CreateResponseContext createFileAndResolve(SmbPath path, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
-        SMB2CreateResponse resp = super.createFile(path, impersonationLevel, accessMask, fileAttributes, shareAccess, createDisposition, createOptions);
+    private SMB2CreateResponseContext createFileAndResolve(SmbPath path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+        SMB2CreateResponse resp = super.createFile(path, oplockLevel, impersonationLevel, accessMask, fileAttributes, shareAccess, createDisposition, createOptions);
         try {
             SmbPath target = resolver.resolve(session, resp, path);
             DiskShare resolveShare = this;
@@ -89,7 +92,7 @@ public class DiskShare extends Share {
                 resolveShare = (DiskShare) connectedSession.connectShare(target.getShareName());
             }
             if (!path.equals(target)) {
-                return resolveShare.createFileAndResolve(target, impersonationLevel, accessMask, fileAttributes, shareAccess, createDisposition, createOptions);
+                return resolveShare.createFileAndResolve(target, oplockLevel, impersonationLevel, accessMask, fileAttributes, shareAccess, createDisposition, createOptions);
             }
         } catch (PathResolveException e) {
             throw new SMBApiException(e.getStatus(), SMB2MessageCommandCode.SMB2_CREATE, "Cannot resolve path " + path, e);
@@ -112,14 +115,14 @@ public class DiskShare extends Share {
         if (response.getFileAttributes().contains(FILE_ATTRIBUTE_DIRECTORY)) {
             return new Directory(response.getFileId(), responseContext.share, path);
         } else {
-            return new File(response.getFileId(), responseContext.share, path);
+            return new File(response.getFileId(), responseContext.share, path, response.getOplockLevel(), bus);
         }
     }
 
     /**
      * Get a handle to a directory in the given path
      */
-    public Directory openDirectory(String path, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+    public Directory openDirectory(String path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
         EnumSet<SMB2CreateOptions> actualCreateOptions = createOptions != null ? EnumSet.copyOf(createOptions) : EnumSet.noneOf(SMB2CreateOptions.class);
         actualCreateOptions.add(FILE_DIRECTORY_FILE);
         actualCreateOptions.remove(FILE_NON_DIRECTORY_FILE);
@@ -129,6 +132,8 @@ public class DiskShare extends Share {
 
         return (Directory) open(
             path,
+            oplockLevel,
+            impersonationLevel,
             accessMask,
             actualAttributes,
             shareAccesses,
@@ -137,7 +142,7 @@ public class DiskShare extends Share {
         );
     }
 
-    public File openFile(String path, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+    public File openFile(String path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
         EnumSet<SMB2CreateOptions> actualCreateOptions = createOptions != null ? EnumSet.copyOf(createOptions) : EnumSet.noneOf(SMB2CreateOptions.class);
         actualCreateOptions.add(FILE_NON_DIRECTORY_FILE);
         actualCreateOptions.remove(FILE_DIRECTORY_FILE);
@@ -147,6 +152,8 @@ public class DiskShare extends Share {
 
         return (File) open(
             path,
+            oplockLevel,
+            impersonationLevel,
             accessMask,
             actualAttributes,
             shareAccesses,
@@ -170,7 +177,7 @@ public class DiskShare extends Share {
     }
 
     private boolean exists(String path, EnumSet<SMB2CreateOptions> createOptions, Set<NtStatus> acceptedStatuses) throws SMBApiException {
-        try (DiskEntry ignored = open(path, of(FILE_READ_ATTRIBUTES), of(FILE_ATTRIBUTE_NORMAL), ALL, FILE_OPEN, createOptions)) {
+        try (DiskEntry ignored = open(path, null, null, of(FILE_READ_ATTRIBUTES), of(FILE_ATTRIBUTE_NORMAL), ALL, FILE_OPEN, createOptions)) {
             return true;
         } catch (SMBApiException sae) {
             if (acceptedStatuses.contains(sae.getStatus())) {
@@ -214,7 +221,7 @@ public class DiskShare extends Share {
      * @see Directory#iterator(Class, String)
      */
     public <I extends FileDirectoryQueryableInformation> List<I> list(String path, Class<I> informationClass, String searchPattern) {
-        try (Directory d = openDirectory(path, of(FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_READ_EA), null, ALL, FILE_OPEN, null)) {
+        try (Directory d = openDirectory(path, null, null, of(FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_READ_EA), null, ALL, FILE_OPEN, null)) {
             return d.list(informationClass, searchPattern);
         }
     }
@@ -225,6 +232,8 @@ public class DiskShare extends Share {
     public void mkdir(String path) throws SMBApiException {
         Directory fileHandle = openDirectory(
             path,
+            null,
+            null,
             of(FILE_LIST_DIRECTORY, FILE_ADD_SUBDIRECTORY),
             of(FILE_ATTRIBUTE_DIRECTORY),
             ALL,
@@ -244,7 +253,7 @@ public class DiskShare extends Share {
      * Get information about the given path.
      **/
     public <F extends FileQueryableInformation> F getFileInformation(String path, Class<F> informationClass) throws SMBApiException {
-        try (DiskEntry e = open(path, of(FILE_READ_ATTRIBUTES, FILE_READ_EA), null, ALL, FILE_OPEN, null)) {
+        try (DiskEntry e = open(path, null, null, of(FILE_READ_ATTRIBUTES, FILE_READ_EA), null, ALL, FILE_OPEN, null)) {
             return e.getFileInformation(informationClass);
         }
     }
@@ -292,7 +301,7 @@ public class DiskShare extends Share {
      * Get information for a given path
      **/
     public <F extends FileSettableInformation> void setFileInformation(String path, F information) throws SMBApiException {
-        try (DiskEntry e = open(path, of(FILE_WRITE_ATTRIBUTES, FILE_WRITE_EA), null, ALL, FILE_OPEN, null)) {
+        try (DiskEntry e = open(path, null, null, of(FILE_WRITE_ATTRIBUTES, FILE_WRITE_EA), null, ALL, FILE_OPEN, null)) {
             e.setFileInformation(information);
         }
     }
@@ -303,7 +312,7 @@ public class DiskShare extends Share {
      * @return the ShareInfo
      */
     public ShareInfo getShareInformation() throws SMBApiException {
-        try (Directory directory = openDirectory("", of(FILE_READ_ATTRIBUTES), null, ALL, FILE_OPEN, null)) {
+        try (Directory directory = openDirectory("", null, null, of(FILE_READ_ATTRIBUTES), null, ALL, FILE_OPEN, null)) {
             byte[] outputBuffer = queryInfo(
                 directory.getFileId(),
                 SMB2QueryInfoRequest.SMB2QueryInfoType.SMB2_0_INFO_FILESYSTEM,
@@ -341,6 +350,8 @@ public class DiskShare extends Share {
         } else {
             try (DiskEntry e = open(
                 path,
+                null,
+                null,
                 of(DELETE),
                 of(FILE_ATTRIBUTE_DIRECTORY),
                 of(FILE_SHARE_DELETE, FILE_SHARE_WRITE, FILE_SHARE_READ),
@@ -358,6 +369,8 @@ public class DiskShare extends Share {
     public void rm(String path) throws SMBApiException {
         try (DiskEntry e = open(
             path,
+            null,
+            null,
             of(DELETE),
             of(FILE_ATTRIBUTE_NORMAL),
             of(FILE_SHARE_DELETE, FILE_SHARE_WRITE, FILE_SHARE_READ),
@@ -381,7 +394,7 @@ public class DiskShare extends Share {
             accessMask.add(ACCESS_SYSTEM_SECURITY);
         }
 
-        try (DiskEntry e = open(path, accessMask, null, ALL, FILE_OPEN, null)) {
+        try (DiskEntry e = open(path, null, null, accessMask, null, ALL, FILE_OPEN, null)) {
             return e.getSecurityInformation(securityInfo);
         }
     }
@@ -414,7 +427,7 @@ public class DiskShare extends Share {
             accessMask.add(WRITE_DAC);
         }
 
-        try (DiskEntry e = open(path, accessMask, null, ALL, FILE_OPEN, null)) {
+        try (DiskEntry e = open(path, null, null, accessMask, null, ALL, FILE_OPEN, null)) {
             e.setSecurityInformation(securityDescriptor, securityInfo);
         }
     }
@@ -441,7 +454,7 @@ public class DiskShare extends Share {
     }
 
     /**
-     * A return object for the {@link #createFileAndResolve(SmbPath, SMB2ImpersonationLevel, Set, Set, Set, SMB2CreateDisposition, Set)} call.
+     * A return object for the {@link #createFileAndResolve(SmbPath, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel, Set, Set, Set, SMB2CreateDisposition, Set)} call.
      *
      * This object wraps the {@link SMB2CreateResponse} and the actual {@link Share} which generated it if the path needed to be resolved.
      */

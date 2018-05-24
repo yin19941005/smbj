@@ -116,14 +116,15 @@ public class Share implements AutoCloseable {
         return writeBufferSize;
     }
 
-    SMB2FileId openFileId(SmbPath path, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
-        return createFile(path, impersonationLevel, accessMask, fileAttributes, shareAccess, createDisposition, createOptions).getFileId();
+    SMB2FileId openFileId(SmbPath path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+        return createFile(path, oplockLevel, impersonationLevel, accessMask, fileAttributes, shareAccess, createDisposition, createOptions).getFileId();
     }
 
-    SMB2CreateResponse createFile(SmbPath path, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+    SMB2CreateResponse createFile(SmbPath path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
         SMB2CreateRequest cr = new SMB2CreateRequest(
             dialect,
             sessionId, treeId,
+            oplockLevel,
             impersonationLevel,
             accessMask,
             fileAttributes,
@@ -315,6 +316,15 @@ public class Share implements AutoCloseable {
 
         SMB2IoctlRequest ioreq = new SMB2IoctlRequest(dialect, sessionId, treeId, ctlCode, fileId, inData, isFsCtl, maxResponse);
         return send(ioreq);
+    }
+
+    SMB2OplockBreakAcknowledgmentResponse sendOplockBreakAcknowledgment(SMB2FileId fileId, SMB2OplockLevel oplockLevel) {
+        SMB2OplockBreakAcknowledgment qreq = new SMB2OplockBreakAcknowledgment(
+            dialect,
+            sessionId, treeId,
+            oplockLevel, fileId
+        );
+        return sendReceive(qreq, "OplockBreakAck", fileId, SUCCESS, transactTimeout);
     }
 
     private <T extends SMB2Packet> T sendReceive(SMB2Packet request, String name, Object target, Set<NtStatus> successResponses, long timeout) {

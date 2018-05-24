@@ -89,15 +89,15 @@ public class PipeShare extends Share {
         }
     }
 
-    public NamedPipe open(String name, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+    public NamedPipe open(String name, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
         SmbPath path = new SmbPath(smbPath, name);
-        SMB2FileId response = super.openFileId(path, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions);
+        SMB2FileId response = super.openFileId(path, oplockLevel, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions);
         return new NamedPipe(response, this, path);
     }
 
-    public SMB2FileId openFileId(String name, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+    public SMB2FileId openFileId(String name, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
         SmbPath path = new SmbPath(smbPath, name);
-        return super.openFileId(path, impersonationLevel, accessMask, fileAttributes, shareAccess, createDisposition, createOptions);
+        return super.openFileId(path, oplockLevel, impersonationLevel, accessMask, fileAttributes, shareAccess, createDisposition, createOptions);
     }
 
     public void closeFileId(SMB2FileId fileId) throws SMBApiException {

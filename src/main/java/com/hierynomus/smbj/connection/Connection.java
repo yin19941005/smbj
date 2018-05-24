@@ -35,6 +35,7 @@ import com.hierynomus.smbj.auth.AuthenticationContext;
 import com.hierynomus.smbj.auth.Authenticator;
 import com.hierynomus.smbj.common.SMBRuntimeException;
 import com.hierynomus.smbj.event.ConnectionClosed;
+import com.hierynomus.smbj.event.OplockBreakNotification;
 import com.hierynomus.smbj.event.SMBEventBus;
 import com.hierynomus.smbj.event.SessionLoggedOff;
 import com.hierynomus.smbj.session.Session;
@@ -363,6 +364,18 @@ public class Connection implements Closeable, PacketReceiver<SMBPacket<?>> {
         long messageId = packet.getSequenceNumber();
 
         if (!outstandingRequests.isOutstanding(messageId)) {
+
+            // 3.2.5.19 Receiving an SMB2 OPLOCK_BREAK Notification
+            // If the MessageId field of the SMB2 header of the response is 0xFFFFFFFFFFFFFFFF,
+            // this MUST be
+            // processed as an oplock break indication.
+            if(packet instanceof SMB2OplockBreakNotification) {
+                SMB2OplockBreakNotification oplockBreakNotification = (SMB2OplockBreakNotification)packet;
+                logger.debug("Received SMB2OplockBreakNotification Packet for FileId {} with {}", oplockBreakNotification.getFileId(), oplockBreakNotification.getOplockLevel());
+                bus.publish(new OplockBreakNotification(oplockBreakNotification.getOplockLevel(), oplockBreakNotification.getFileId()));
+                return;
+            }
+
             throw new TransportException("Received response with unknown sequence number <<" + messageId + ">>");
         }
 

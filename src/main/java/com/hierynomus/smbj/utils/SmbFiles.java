@@ -50,6 +50,8 @@ public class SmbFiles {
                 if (destPath != null && is != null) {
                     try (com.hierynomus.smbj.share.File f = share.openFile(
                         destPath,
+                        null,
+                        null,
                         EnumSet.of(AccessMask.GENERIC_WRITE),
                         EnumSet.of(FileAttributes.FILE_ATTRIBUTE_NORMAL),
                         EnumSet.of(SMB2ShareAccess.FILE_SHARE_WRITE),

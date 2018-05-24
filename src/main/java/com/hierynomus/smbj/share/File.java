@@ -18,10 +18,18 @@ package com.hierynomus.smbj.share;
 import com.hierynomus.mserref.NtStatus;
 import com.hierynomus.msfscc.fileinformation.FileEndOfFileInformation;
 import com.hierynomus.mssmb2.SMB2FileId;
+import com.hierynomus.mssmb2.SMB2OplockLevel;
 import com.hierynomus.mssmb2.SMBApiException;
+import com.hierynomus.mssmb2.messages.SMB2OplockBreakAcknowledgmentResponse;
 import com.hierynomus.mssmb2.messages.SMB2ReadResponse;
 import com.hierynomus.smbj.ProgressListener;
+import com.hierynomus.smbj.event.OplockBreakNotification;
+import com.hierynomus.smbj.event.SMBEventBus;
+import com.hierynomus.smbj.event.handler.OplockBreakNotificationHandler;
 import com.hierynomus.smbj.io.ByteChunkProvider;
+
+import net.engio.mbassy.listener.Handler;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,10 +42,18 @@ public class File extends DiskEntry {
 
     private static final Logger logger = LoggerFactory.getLogger(File.class);
     private final SMB2Writer writer;
+    private SMBEventBus bus;
+    private OplockBreakNotificationHandler oplockBreakNotificationHandler = null;
+    private SMB2OplockLevel oplockLevel;
 
-    File(SMB2FileId fileId, DiskShare diskShare, String fileName) {
+    File(SMB2FileId fileId, DiskShare diskShare, String fileName, SMB2OplockLevel oplockLevel, SMBEventBus bus) {
         super(fileId, diskShare, fileName);
         this.writer = new SMB2Writer(diskShare, fileId, fileName);
+        this.oplockLevel = oplockLevel;
+        this.bus = bus;
+        if (bus != null) {
+            bus.subscribe(this);
+        }
     }
 
     /**
@@ -161,6 +177,50 @@ public class File extends DiskEntry {
 
     public InputStream getInputStream(ProgressListener listener) {
         return new FileInputStream(this, share.getReadBufferSize(), share.getReadTimeout(), listener);
+    }
+
+    public SMB2OplockLevel getOplockLevel() {
+        return oplockLevel;
+    }
+
+    /***
+     * 3.2.5.19 Receiving an SMB2 OPLOCK_BREAK Notification, this handler is responsible to call acknowledgeOplockBreak if needed. Set the handler for Receiving an Oplock Break Notification.
+     * @param handler handler for Receiving an Oplock Break Notification
+     */
+    public void setOplockBreakNotificationHandler(OplockBreakNotificationHandler handler) {
+        this.oplockBreakNotificationHandler = handler;
+    }
+
+    @Handler
+    @SuppressWarnings("unused")
+    private void oplockBreakNotification(final OplockBreakNotification oplockBreakNotification) {
+        try {
+
+            SMB2FileId fileId = oplockBreakNotification.getFileId();
+            SMB2OplockLevel oplockLevel = oplockBreakNotification.getOplockLevel();
+
+            // only perform action when fileId is match
+            if(this.fileId.toString().equals(fileId.toString())) {
+                logger.debug("FileId {} received OplockBreakNotification, Oplock level {}", fileId, oplockLevel);
+
+                SMB2OplockLevel levelBeforeBreak = this.oplockLevel;
+                this.oplockLevel = oplockLevel;
+
+                // Let the user define how to deal with oplock on its own application
+                if(oplockBreakNotificationHandler != null) {
+                    oplockBreakNotificationHandler.handle(oplockBreakNotification, levelBeforeBreak);
+                }else {
+                    logger.warn("FileId {}, OplockBreakNotificationHandler not exist to handle Oplock Break.");
+                }
+            }
+        } catch (Throwable t) {
+            logger.error("Handling oplockBreakNotification error occur : ", t);
+            throw t;
+        }
+    }
+
+    public SMB2OplockBreakAcknowledgmentResponse acknowledgeOplockBreak(SMB2OplockLevel oplockLevel) {
+        return share.sendOplockBreakAcknowledgment(fileId, oplockLevel);
     }
 
     @Override

@@ -178,7 +178,7 @@ public class Session implements AutoCloseable {
 
             Share share;
             if (response.isDiskShare()) {
-                share = new DiskShare(smbPath, treeConnect, pathResolver);
+                share = new DiskShare(smbPath, treeConnect, pathResolver, bus);
             } else if (response.isNamedPipe()) {
                 share = new PipeShare(smbPath, treeConnect);
             } else if (response.isPrinterShare()) {
