@@ -318,7 +318,7 @@ public class Share implements AutoCloseable {
         return send(ioreq);
     }
 
-    SMB2OplockBreakAcknowledgmentResponse sendOplockBreakAcknowledgment(SMB2FileId fileId, SMB2OplockLevel oplockLevel) {
+    SMB2OplockBreakAcknowledgmentResponse sendOplockBreakAcknowledgment(SMB2FileId fileId, SMB2OplockBreakLevel oplockLevel) {
         SMB2OplockBreakAcknowledgment qreq = new SMB2OplockBreakAcknowledgment(
             dialect,
             sessionId, treeId,

@@ -1,19 +1,19 @@
 package com.hierynomus.smbj.event;
 
 import com.hierynomus.mssmb2.SMB2FileId;
-import com.hierynomus.mssmb2.SMB2OplockLevel;
+import com.hierynomus.mssmb2.SMB2OplockBreakLevel;
 
 public class OplockBreakNotification implements SMBEvent {
 
-    private SMB2OplockLevel oplockLevel;
+    private SMB2OplockBreakLevel oplockLevel;
     private SMB2FileId fileId;
 
-    public OplockBreakNotification(SMB2OplockLevel oplockLevel, SMB2FileId fileId) {
+    public OplockBreakNotification(SMB2OplockBreakLevel oplockLevel, SMB2FileId fileId) {
         this.oplockLevel = oplockLevel;
         this.fileId = fileId;
     }
 
-    public SMB2OplockLevel getOplockLevel() {
+    public SMB2OplockBreakLevel getOplockLevel() {
         return oplockLevel;
     }
 

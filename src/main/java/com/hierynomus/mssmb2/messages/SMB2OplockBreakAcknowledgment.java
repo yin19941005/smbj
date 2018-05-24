@@ -3,7 +3,7 @@ package com.hierynomus.mssmb2.messages;
 import com.hierynomus.mssmb2.SMB2Dialect;
 import com.hierynomus.mssmb2.SMB2FileId;
 import com.hierynomus.mssmb2.SMB2MessageCommandCode;
-import com.hierynomus.mssmb2.SMB2OplockLevel;
+import com.hierynomus.mssmb2.SMB2OplockBreakLevel;
 import com.hierynomus.mssmb2.SMB2Packet;
 import com.hierynomus.smb.SMBBuffer;
 
@@ -12,10 +12,10 @@ import com.hierynomus.smb.SMBBuffer;
  */
 public class SMB2OplockBreakAcknowledgment extends SMB2Packet {
 
-    private SMB2OplockLevel oplockLevel;
+    private SMB2OplockBreakLevel oplockLevel;
     private SMB2FileId fileId;
 
-    public SMB2OplockBreakAcknowledgment(SMB2Dialect negotiatedDialect, long sessionId, long treeId, SMB2OplockLevel oplockLevel, SMB2FileId fileId) {
+    public SMB2OplockBreakAcknowledgment(SMB2Dialect negotiatedDialect, long sessionId, long treeId, SMB2OplockBreakLevel oplockLevel, SMB2FileId fileId) {
         super(24, negotiatedDialect, SMB2MessageCommandCode.SMB2_OPLOCK_BREAK, sessionId, treeId);
         this.oplockLevel = oplockLevel;
         this.fileId = fileId;

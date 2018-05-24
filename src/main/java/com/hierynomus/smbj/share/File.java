@@ -18,6 +18,7 @@ package com.hierynomus.smbj.share;
 import com.hierynomus.mserref.NtStatus;
 import com.hierynomus.msfscc.fileinformation.FileEndOfFileInformation;
 import com.hierynomus.mssmb2.SMB2FileId;
+import com.hierynomus.mssmb2.SMB2OplockBreakLevel;
 import com.hierynomus.mssmb2.SMB2OplockLevel;
 import com.hierynomus.mssmb2.SMBApiException;
 import com.hierynomus.mssmb2.messages.SMB2OplockBreakAcknowledgmentResponse;
@@ -197,14 +198,19 @@ public class File extends DiskEntry {
         try {
 
             SMB2FileId fileId = oplockBreakNotification.getFileId();
-            SMB2OplockLevel oplockLevel = oplockBreakNotification.getOplockLevel();
+            SMB2OplockBreakLevel oplockLevel = oplockBreakNotification.getOplockLevel();
 
             // only perform action when fileId is match
             if(this.fileId.toString().equals(fileId.toString())) {
                 logger.debug("FileId {} received OplockBreakNotification, Oplock level {}", fileId, oplockLevel);
 
                 SMB2OplockLevel levelBeforeBreak = this.oplockLevel;
-                this.oplockLevel = oplockLevel;
+                switch (oplockLevel) {
+                    case SMB2_OPLOCK_LEVEL_NONE:
+                        this.oplockLevel = SMB2OplockLevel.SMB2_OPLOCK_LEVEL_NONE;
+                    case SMB2_OPLOCK_LEVEL_II:
+                        this.oplockLevel = SMB2OplockLevel.SMB2_OPLOCK_LEVEL_II;
+                }
 
                 // Let the user define how to deal with oplock on its own application
                 if(oplockBreakNotificationHandler != null) {
@@ -219,7 +225,7 @@ public class File extends DiskEntry {
         }
     }
 
-    public SMB2OplockBreakAcknowledgmentResponse acknowledgeOplockBreak(SMB2OplockLevel oplockLevel) {
+    public SMB2OplockBreakAcknowledgmentResponse acknowledgeOplockBreak(SMB2OplockBreakLevel oplockLevel) {
         return share.sendOplockBreakAcknowledgment(fileId, oplockLevel);
     }
 
