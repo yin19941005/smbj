@@ -68,6 +68,10 @@ public class DiskShare extends Share {
         this.bus = bus;
     }
 
+    public DiskEntry open(String path, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+        return open(path, null, null, accessMask, attributes, shareAccesses, createDisposition, createOptions);
+    }
+
     public DiskEntry open(String path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
         SmbPath pathAndFile = new SmbPath(smbPath, path);
         SMB2CreateResponseContext response = createFileAndResolve(pathAndFile, oplockLevel, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions);
@@ -454,7 +458,7 @@ public class DiskShare extends Share {
     }
 
     /**
-     * A return object for the {@link #createFileAndResolve(SmbPath, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel, Set, Set, Set, SMB2CreateDisposition, Set)} call.
+     * A return object for the {@link #createFileAndResolve(SmbPath, SMB2OplockLevel, SMB2ImpersonationLevel, Set, Set, Set, SMB2CreateDisposition, Set)} call.
      *
      * This object wraps the {@link SMB2CreateResponse} and the actual {@link Share} which generated it if the path needed to be resolved.
      */
