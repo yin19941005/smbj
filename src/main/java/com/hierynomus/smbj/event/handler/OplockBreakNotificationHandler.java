@@ -7,6 +7,5 @@ import com.hierynomus.mssmb2.SMB2OplockLevel;
 public interface OplockBreakNotificationHandler {
     void handle(OplockBreakNotificationHandlerType type,
                        SMB2OplockBreakLevel oplockBreakLevel,
-                       SMB2FileId fileId,
-                       SMB2OplockLevel levelBeforeBreak);
+                       SMB2FileId fileId);
 }
