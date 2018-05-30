@@ -35,15 +35,24 @@ import com.hierynomus.smbj.SMBClient;
 import com.hierynomus.smbj.common.SMBRuntimeException;
 import com.hierynomus.smbj.common.SmbPath;
 import com.hierynomus.smbj.connection.Connection;
+import com.hierynomus.smbj.event.CreateResponsePendingWithOplock;
+import com.hierynomus.smbj.event.OplockBreakNotification;
 import com.hierynomus.smbj.event.SMBEventBus;
+import com.hierynomus.smbj.event.handler.OplockBreakNotificationHandler;
 import com.hierynomus.smbj.paths.PathResolveException;
 import com.hierynomus.smbj.paths.PathResolver;
 import com.hierynomus.smbj.session.Session;
+
+import net.engio.mbassy.listener.Handler;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static com.hierynomus.msdtyp.AccessMask.*;
 import static com.hierynomus.mserref.NtStatus.*;
@@ -55,17 +64,33 @@ import static com.hierynomus.mssmb2.SMB2CreateOptions.FILE_DIRECTORY_FILE;
 import static com.hierynomus.mssmb2.SMB2CreateOptions.FILE_NON_DIRECTORY_FILE;
 import static com.hierynomus.mssmb2.SMB2ShareAccess.*;
 import static com.hierynomus.mssmb2.messages.SMB2QueryInfoRequest.SMB2QueryInfoType.SMB2_0_INFO_SECURITY;
+
+
+import static com.hierynomus.smbj.event.handler.OplockBreakNotificationHandlerType
+    .SMB2_CREATE_RESPONSE;
+import static com.hierynomus.smbj.event.handler.OplockBreakNotificationHandlerType
+    .SMB2_OPLOCK_BREAK_NOTIFICATION;
 import static java.util.EnumSet.of;
 import static java.util.EnumSet.noneOf;
 
 public class DiskShare extends Share {
+    private static final Logger logger = LoggerFactory.getLogger(DiskShare.class);
     private final PathResolver resolver;
     private SMBEventBus bus;
+    private OplockBreakNotificationHandler oplockBreakNotificationHandler = null;
+    // the Map for handler in diskShare to use to notify the client the oplockBreakNotification for corresponding File instance
+    private final ConcurrentHashMap<String, DiskEntry> openedFileMap = new ConcurrentHashMap<>();
+    // TODO: Check is createResponsePendingWithOplockMap is required Map, or just List is OK.
+    // the Map for tracking the createResponse status as exact as in TCP/IP layer to ensure the oplockBreakNotification handling correct
+    private final ConcurrentHashMap<String, String> createResponsePendingWithOplockMap = new ConcurrentHashMap<>();
 
     public DiskShare(SmbPath smbPath, TreeConnect treeConnect, PathResolver pathResolver, SMBEventBus bus) {
         super(smbPath, treeConnect);
         this.resolver = pathResolver;
         this.bus = bus;
+        if (bus != null) {
+            bus.subscribe(this);
+        }
     }
 
     public DiskEntry open(String path, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
@@ -75,7 +100,13 @@ public class DiskShare extends Share {
     public DiskEntry open(String path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
         SmbPath pathAndFile = new SmbPath(smbPath, path);
         SMB2CreateResponseContext response = createFileAndResolve(pathAndFile, oplockLevel, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions);
-        return getDiskEntry(path, response);
+        DiskEntry diskEntry = getDiskEntry(path, response);
+        final SMB2FileId fileId = response.resp.getFileId();
+        // record the map for fileId and File instance, i.e. record it as openedFile
+        openedFileMap.put(fileId.toHexString(), diskEntry);
+        // Removing the pending status for create Response
+        createResponsePendingWithOplockMap.remove(fileId.toHexString());
+        return diskEntry;
     }
 
     @Override
@@ -117,9 +148,9 @@ public class DiskShare extends Share {
     protected DiskEntry getDiskEntry(String path, SMB2CreateResponseContext responseContext) {
         SMB2CreateResponse response = responseContext.resp;
         if (response.getFileAttributes().contains(FILE_ATTRIBUTE_DIRECTORY)) {
-            return new Directory(response.getFileId(), responseContext.share, path);
+            return new Directory(response.getFileId(), responseContext.share, path, response.getOplockLevel());
         } else {
-            return new File(response.getFileId(), responseContext.share, path, response.getOplockLevel(), bus);
+            return new File(response.getFileId(), responseContext.share, path, response.getOplockLevel());
         }
     }
 
@@ -164,6 +195,17 @@ public class DiskShare extends Share {
             createDisposition,
             actualCreateOptions
         );
+    }
+
+    /***
+     * Closing the file by fileId and remove it from the openedFileMap.
+     * @param fileId the fileId of the target to close file
+     * @throws SMBApiException
+     */
+    @Override
+    void closeFileId(SMB2FileId fileId) throws SMBApiException {
+        super.closeFileId(fileId);
+        openedFileMap.remove(fileId.toHexString());
     }
 
     /**
@@ -450,6 +492,98 @@ public class DiskShare extends Share {
             null,
             buffer.getCompactData()
         );
+    }
+
+    /***
+     * 3.2.5.19 Receiving an SMB2 OPLOCK_BREAK Notification, this handler is responsible to call acknowledgeOplockBreak if needed. Set the handler for Receiving an Oplock Break Notification.
+     * You MUST set this handler before create/open diskEntry with oplock.
+     *
+     * @param handler handler for Receiving an Oplock Break Notification
+     */
+    public void setOplockBreakNotificationHandler(OplockBreakNotificationHandler handler) {
+        this.oplockBreakNotificationHandler = handler;
+    }
+
+    /***
+     * Handler for handing the oplock break notification event from server. 3.2.5.19 Receiving an SMB2 OPLOCK_BREAK Notification.
+     *
+     * @param oplockBreakNotification received oplock break notification from server.
+     */
+    @Handler
+    @SuppressWarnings("unused")
+    private void oplockBreakNotification(final OplockBreakNotification oplockBreakNotification) {
+        try {
+
+            final SMB2FileId fileId = oplockBreakNotification.getFileId();
+            final SMB2OplockBreakLevel oplockLevel = oplockBreakNotification.getOplockLevel();
+
+            // find the corresponding diskEntry instance
+            if(!openedFileMap.containsKey(fileId.toHexString()) && !createResponsePendingWithOplockMap
+                .containsKey(fileId.toHexString())) {
+                // 3.2.5.19.1 Receiving an Oplock Break Notification
+                // The client MUST locate the open in the Session.OpenTable using the FileId in the Oplock Break
+                // Notification following the SMB2 header. If the open is not found, the oplock break indication MUST be
+                // discarded, and no further processing is required.
+            }else {
+                DiskEntry diskEntry = openedFileMap.get(fileId.toHexString());
+                if(diskEntry != null) {
+                    logger.debug("FileId {} received OplockBreakNotification, Oplock level {}", fileId, oplockLevel);
+
+                    final SMB2OplockLevel levelBeforeBreak = diskEntry.getOplockLevel();
+                    diskEntry.setOplockBreakLevel(oplockLevel);
+
+                    if(oplockBreakNotificationHandler != null) {
+                        // Preventing the improper use of handler (holding the thread). if holding thread, timeout exception will be throw.
+                        Thread t = new Thread(new Runnable() {
+                            @Override
+                            public void run() {
+                                oplockBreakNotificationHandler.handle(SMB2_OPLOCK_BREAK_NOTIFICATION, oplockLevel, fileId, levelBeforeBreak);
+                            }
+                        });
+                        t.start();
+                    }else {
+                        logger.warn("FileId {}, OplockBreakNotificationHandler not exist to handle Oplock Break.");
+                        throw new IllegalStateException("OplockBreakNotificationHandler not exist to handle Oplock Break.");
+                    }
+                }else {
+                    logger.warn("FileId {}, diskEntry not exist to handle Oplock Break.");
+                    throw new IllegalStateException("diskEntry not exist to handle Oplock Break.");
+                }
+            }
+        } catch (Throwable t) {
+            logger.error("Handling oplockBreakNotification error occur : ", t);
+            throw t;
+        }
+    }
+
+    /***
+     * Oplock related handler. Handler for handling create response granted oplock.
+     * This is intended to prevent oplock break too fast and not able to handle oplock break notification properly.
+     * Notify the client oplock is granted on createResponse but still under processing.
+     *
+     * @param createResponsePendingWithOplock the corresponding fileId had granted some level of oplock.
+     */
+    @Handler
+    @SuppressWarnings("unused")
+    private void createResponsePendingWithOplock(final CreateResponsePendingWithOplock createResponsePendingWithOplock) {
+        // Put the fileId to createResponse pending map to indicate this is a create response granted oplock
+        createResponsePendingWithOplockMap.put(createResponsePendingWithOplock.getFileId().toHexString(),
+                                               createResponsePendingWithOplock.getFileId().toHexString());
+
+        if(oplockBreakNotificationHandler != null) {
+            // Preventing the improper use of handler (holding the thread). if holding thread, timeout exception will be throw.
+            Thread t = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    oplockBreakNotificationHandler.handle(SMB2_CREATE_RESPONSE, null, createResponsePendingWithOplock.getFileId(), null);
+                }
+            });
+            t.start();
+        }else {
+            logger.warn("FileId {}, OplockBreakNotificationHandler not exist to handle Create Response with Oplock.");
+            throw new IllegalStateException("OplockBreakNotificationHandler not exist to handle Create Response with Oplock.");
+        }
+
     }
 
     @Override

@@ -23,8 +23,12 @@ import com.hierynomus.msfscc.fileinformation.FileQueryableInformation;
 import com.hierynomus.msfscc.fileinformation.FileRenameInformation;
 import com.hierynomus.msfscc.fileinformation.FileSettableInformation;
 import com.hierynomus.mssmb2.SMB2FileId;
+import com.hierynomus.mssmb2.SMB2OplockBreakLevel;
+import com.hierynomus.mssmb2.SMB2OplockLevel;
 import com.hierynomus.mssmb2.SMBApiException;
+import com.hierynomus.mssmb2.messages.SMB2OplockBreakAcknowledgmentResponse;
 import com.hierynomus.protocol.transport.TransportException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,11 +42,13 @@ public abstract class DiskEntry implements Closeable {
     protected DiskShare share;
     protected SMB2FileId fileId;
     protected String fileName;
+    volatile protected SMB2OplockLevel oplockLevel;
 
-    DiskEntry(SMB2FileId fileId, DiskShare share, String fileName) {
+    DiskEntry(SMB2FileId fileId, DiskShare share, String fileName, SMB2OplockLevel oplockLevel) {
         this.share = share;
         this.fileId = fileId;
         this.fileName = fileName;
+        this.oplockLevel = oplockLevel;
     }
 
     public void close() {
@@ -180,5 +186,38 @@ public abstract class DiskEntry implements Closeable {
         } catch (Exception e) {
             logger.warn("File close failed for {},{},{}", fileName, share, fileId, e);
         }
+    }
+
+    /***
+     * Getter for current oplock level
+     *
+     * @return current holding oplock level of this diskEntry
+     */
+    public SMB2OplockLevel getOplockLevel() {
+        return oplockLevel;
+    }
+
+    /***
+     * Notify the oplock break level and set the oplock level
+     *
+     * @param oplockLevel oplock break level for setting new oplock level
+     */
+    protected void setOplockBreakLevel(SMB2OplockBreakLevel oplockLevel) {
+        switch (oplockLevel) {
+            case SMB2_OPLOCK_LEVEL_NONE:
+                this.oplockLevel = SMB2OplockLevel.SMB2_OPLOCK_LEVEL_NONE;
+            case SMB2_OPLOCK_LEVEL_II:
+                this.oplockLevel = SMB2OplockLevel.SMB2_OPLOCK_LEVEL_II;
+        }
+    }
+
+    /***
+     * Send a acknowledgment for Oplock Break Notification. 2.2.24 SMB2 OPLOCK_BREAK Acknowledgment.
+     *
+     * @param oplockLevel the oplock break level after receiving the oplock break notification (current holding oplock level)
+     * @return Server response to oplock break acknowledgment. 2.2.25 SMB2 OPLOCK_BREAK Response.
+     */
+    public SMB2OplockBreakAcknowledgmentResponse acknowledgeOplockBreak(SMB2OplockBreakLevel oplockLevel) {
+        return share.sendOplockBreakAcknowledgment(fileId, oplockLevel);
     }
 }

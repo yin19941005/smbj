@@ -22,6 +22,7 @@ import com.hierynomus.msfscc.fileinformation.FileIdBothDirectoryInformation;
 import com.hierynomus.msfscc.fileinformation.FileInformation;
 import com.hierynomus.msfscc.fileinformation.FileInformationFactory;
 import com.hierynomus.mssmb2.SMB2FileId;
+import com.hierynomus.mssmb2.SMB2OplockLevel;
 import com.hierynomus.mssmb2.SMBApiException;
 import com.hierynomus.mssmb2.messages.SMB2QueryDirectoryRequest;
 import com.hierynomus.mssmb2.messages.SMB2QueryDirectoryResponse;
@@ -29,8 +30,8 @@ import com.hierynomus.mssmb2.messages.SMB2QueryDirectoryResponse;
 import java.util.*;
 
 public class Directory extends DiskEntry implements Iterable<FileIdBothDirectoryInformation> {
-    Directory(SMB2FileId fileId, DiskShare diskShare, String fileName) {
-        super(fileId, diskShare, fileName);
+    Directory(SMB2FileId fileId, DiskShare diskShare, String fileName, SMB2OplockLevel oplockLevel) {
+        super(fileId, diskShare, fileName, oplockLevel);
     }
 
     /**

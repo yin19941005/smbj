@@ -35,6 +35,7 @@ import com.hierynomus.smbj.auth.AuthenticationContext;
 import com.hierynomus.smbj.auth.Authenticator;
 import com.hierynomus.smbj.common.SMBRuntimeException;
 import com.hierynomus.smbj.event.ConnectionClosed;
+import com.hierynomus.smbj.event.CreateResponsePendingWithOplock;
 import com.hierynomus.smbj.event.OplockBreakNotification;
 import com.hierynomus.smbj.event.SMBEventBus;
 import com.hierynomus.smbj.event.SessionLoggedOff;
@@ -414,6 +415,18 @@ public class Connection implements Closeable, PacketReceiver<SMBPacket<?>> {
 
             // check packet signature. Drop the packet if it is not correct.
             verifyPacketSignature(packet, session);
+        }
+
+        // Handing case for Oplock/Lease related issue
+        if(packet instanceof SMB2CreateResponse) {
+            // Notify the diskShare this is on processing/pending createResponse. Don't discard the corresponding oplockBreakNotification.
+            SMB2CreateResponse smb2CreateResponse = (SMB2CreateResponse)packet;
+            if(smb2CreateResponse.getOplockLevel() != SMB2OplockLevel.SMB2_OPLOCK_LEVEL_NONE) {
+                logger.debug("Received SMB2CreateResponse Packet for FileId {} with OplockLevel {}", smb2CreateResponse.getFileId(), smb2CreateResponse.getOplockLevel());
+                bus.publish(new CreateResponsePendingWithOplock(smb2CreateResponse.getFileId()));
+            }else {
+                // just ignore it, if it didn't granted any oplock.
+            }
         }
 
         // [MS-SMB2].pdf 3.2.5.1.8 Processing the Response
