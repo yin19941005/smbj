@@ -421,11 +421,20 @@ public class Connection implements Closeable, PacketReceiver<SMBPacket<?>> {
         if(packet instanceof SMB2CreateResponse) {
             // Notify the diskShare this is on processing/pending createResponse. Don't discard the corresponding oplockBreakNotification.
             SMB2CreateResponse smb2CreateResponse = (SMB2CreateResponse)packet;
-            if(smb2CreateResponse.getOplockLevel() != SMB2OplockLevel.SMB2_OPLOCK_LEVEL_NONE) {
+            if(smb2CreateResponse.getOplockLevel() != null &&
+               smb2CreateResponse.getOplockLevel() != SMB2OplockLevel.SMB2_OPLOCK_LEVEL_NONE &&
+               smb2CreateResponse.getFileId() != null) {
                 logger.debug("Received SMB2CreateResponse Packet for FileId {} with OplockLevel {}", smb2CreateResponse.getFileId(), smb2CreateResponse.getOplockLevel());
                 bus.publish(new CreateResponsePendingWithOplock(smb2CreateResponse.getFileId()));
             }else {
                 // just ignore it, if it didn't granted any oplock.
+                if(smb2CreateResponse.getFileId() == null && smb2CreateResponse.getOplockLevel() == null) {
+                    logger.debug("Received null for both fileId and oplockLevel on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
+                }else if(smb2CreateResponse.getFileId() == null) {
+                    logger.debug("Received null for fileId on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
+                }else if(smb2CreateResponse.getOplockLevel() == null) {
+                    logger.debug("Received null for oplockLevel on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
+                }
             }
         }
 
