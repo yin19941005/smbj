@@ -26,7 +26,9 @@ import com.hierynomus.mssmb2.SMB2FileId;
 import com.hierynomus.mssmb2.SMB2OplockBreakLevel;
 import com.hierynomus.mssmb2.SMB2OplockLevel;
 import com.hierynomus.mssmb2.SMBApiException;
+import com.hierynomus.mssmb2.messages.SMB2LockResponse;
 import com.hierynomus.mssmb2.messages.SMB2OplockBreakAcknowledgmentResponse;
+import com.hierynomus.mssmb2.messages.submodule.SMB2LockElement;
 import com.hierynomus.protocol.transport.TransportException;
 
 import org.slf4j.Logger;
@@ -34,6 +36,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
 
 public abstract class DiskEntry implements Closeable {
@@ -219,5 +222,17 @@ public abstract class DiskEntry implements Closeable {
      */
     public SMB2OplockBreakAcknowledgmentResponse acknowledgeOplockBreak(SMB2OplockBreakLevel oplockLevel) {
         return share.sendOplockBreakAcknowledgment(fileId, oplockLevel);
+    }
+
+    /***
+     * Send a lock request for diskEntry. This could be lock/unlock operation. 2.2.26 SMB2 LOCK Request
+     *
+     * @param lockSequenceNumber 4-bit integer for Lock Sequence Number.
+     * @param lockSequenceIndex 28-bit integer value that MUST contain a value from 0 to 64
+     * @param lockElements List (an array) of LockCount (2.2.26.1 SMB2_LOCK_ELEMENT Structure) structures.
+     * @return Server response to lock request. 2.2.27 SMB2 LOCK Response
+     */
+    public SMB2LockResponse lockRequest(short lockSequenceNumber, int lockSequenceIndex, List<SMB2LockElement> lockElements) {
+        return share.sendLockRequest(fileId, lockSequenceNumber, lockSequenceIndex, lockElements);
     }
 }

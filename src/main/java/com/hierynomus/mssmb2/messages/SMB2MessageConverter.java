@@ -62,6 +62,8 @@ public class SMB2MessageConverter implements PacketFactory<SMB2Packet> {
                 return read(new SMB2Flush(), buffer);
             case SMB2_WRITE:
                 return read(new SMB2WriteResponse(), buffer);
+            case SMB2_LOCK:
+                return read(new SMB2LockResponse(), buffer);
             case SMB2_IOCTL:
                 return read(new SMB2IoctlResponse(), buffer);
             case SMB2_QUERY_INFO:
@@ -81,7 +83,6 @@ public class SMB2MessageConverter implements PacketFactory<SMB2Packet> {
                 } else {
                     return read(new SMB2OplockBreakAcknowledgmentResponse(), buffer);
                 }
-            case SMB2_LOCK:
             case SMB2_CANCEL:
             default:
                 throw new SMBRuntimeException("Unknown SMB2 Message Command type: " + command);
