@@ -82,7 +82,7 @@ public class DiskShare extends Share {
     private SMBEventBus bus;
     private OplockBreakNotificationHandler oplockBreakNotificationHandler = null;
     // the Map for handler in diskShare to use to notify the client the oplockBreakNotification for corresponding File instance
-    private final ConcurrentHashMap<String, DiskEntry> openedFileMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<SMB2FileId, DiskEntry> openedFileMap = new ConcurrentHashMap<>();
 
     private final ExecutorService oplockBreakNotifyExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
         @Override
@@ -121,7 +121,7 @@ public class DiskShare extends Share {
         DiskEntry diskEntry = getDiskEntry(path, response);
         final SMB2FileId fileId = response.resp.getFileId();
         // record the map for fileId and File instance, i.e. record it as openedFile
-        openedFileMap.put(fileId.toHexString(), diskEntry);
+        openedFileMap.put(fileId, diskEntry);
         return diskEntry;
     }
 
@@ -221,7 +221,7 @@ public class DiskShare extends Share {
     @Override
     void closeFileId(SMB2FileId fileId) throws SMBApiException {
         super.closeFileId(fileId);
-        openedFileMap.remove(fileId.toHexString());
+        openedFileMap.remove(fileId);
     }
 
     /**
@@ -534,7 +534,7 @@ public class DiskShare extends Share {
             final SMB2OplockBreakLevel oplockLevel = oplockBreakNotification.getOplockLevel();
             logger.debug("FileId {} received OplockBreakNotification, Oplock level {}", fileId, oplockLevel);
 
-            DiskEntry diskEntry = openedFileMap.get(fileId.toHexString());
+            DiskEntry diskEntry = openedFileMap.get(fileId);
             if(diskEntry != null) {
                 final SMB2OplockLevel levelBeforeBreak = diskEntry.getOplockLevel();
                 diskEntry.setOplockBreakLevel(oplockLevel);
