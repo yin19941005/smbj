@@ -41,7 +41,13 @@ public class SMB2LockRequest extends SMB2Packet {
                            short lockSequenceNumber, int lockSequenceIndex,
                            SMB2FileId fileId, List<SMB2LockElement> lockElements) {
         super(48, dialect, SMB2MessageCommandCode.SMB2_LOCK, sessionId, treeId);
+        if(lockSequenceNumber < 0 || lockSequenceNumber > 15) {
+            throw new IllegalArgumentException("Only 4-bit integer value is allowed for lockSequenceNumber.");
+        }
         this.lockSequenceNumber = lockSequenceNumber;
+        if(lockSequenceIndex < 0 || lockSequenceIndex > 64) {
+            throw new IllegalArgumentException("Only value between 0 to 64 (inclusive) is allowed for lockSequenceIndex.");
+        }
         this.lockSequenceIndex = lockSequenceIndex;
         this.fileId = fileId;
         this.lockElements = lockElements;
