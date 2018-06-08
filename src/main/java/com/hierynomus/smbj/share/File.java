@@ -37,7 +37,7 @@ public class File extends DiskEntry {
     private static final Logger logger = LoggerFactory.getLogger(File.class);
     private final SMB2Writer writer;
 
-    File(SMB2FileId fileId, DiskShare diskShare, String fileName, SMB2OplockLevel oplockLevel) {
+    public File(SMB2FileId fileId, DiskShare diskShare, String fileName, SMB2OplockLevel oplockLevel) {
         super(fileId, diskShare, fileName, oplockLevel);
         this.writer = new SMB2Writer(diskShare, fileId, fileName);
     }

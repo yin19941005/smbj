@@ -30,7 +30,7 @@ import com.hierynomus.mssmb2.messages.SMB2QueryDirectoryResponse;
 import java.util.*;
 
 public class Directory extends DiskEntry implements Iterable<FileIdBothDirectoryInformation> {
-    Directory(SMB2FileId fileId, DiskShare diskShare, String fileName, SMB2OplockLevel oplockLevel) {
+    public Directory(SMB2FileId fileId, DiskShare diskShare, String fileName, SMB2OplockLevel oplockLevel) {
         super(fileId, diskShare, fileName, oplockLevel);
     }
 

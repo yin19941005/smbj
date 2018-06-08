@@ -52,9 +52,9 @@ import java.io.IOException;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 
 import static com.hierynomus.msdtyp.AccessMask.*;
@@ -81,8 +81,6 @@ public class DiskShare extends Share {
     private final PathResolver resolver;
     private SMBEventBus bus;
     private OplockBreakNotificationHandler oplockBreakNotificationHandler = null;
-    // the Map for handler in diskShare to use to notify the client the oplockBreakNotification for corresponding File instance
-    private final ConcurrentHashMap<SMB2FileId, DiskEntry> openedFileMap = new ConcurrentHashMap<>();
 
     private final ExecutorService oplockBreakNotifyExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
         @Override
@@ -106,8 +104,7 @@ public class DiskShare extends Share {
     @Override
     public void close() throws IOException {
         super.close();
-        // cleanup for Map and executor
-        openedFileMap.clear();
+        // cleanup for executor
         oplockBreakNotifyExecutor.shutdown();
     }
 
@@ -116,13 +113,19 @@ public class DiskShare extends Share {
     }
 
     public DiskEntry open(String path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+        SMB2CreateResponseDiskEntry result = openWithResponse(path, oplockLevel, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions);
+        return result.getDiskEntry();
+    }
+
+    public SMB2CreateResponseDiskEntry openWithResponse(String path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
         SmbPath pathAndFile = new SmbPath(smbPath, path);
         SMB2CreateResponseContext response = createFileAndResolve(pathAndFile, oplockLevel, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions);
-        DiskEntry diskEntry = getDiskEntry(path, response);
-        final SMB2FileId fileId = response.resp.getFileId();
-        // record the map for fileId and File instance, i.e. record it as openedFile
-        openedFileMap.put(fileId, diskEntry);
-        return diskEntry;
+        return new SMB2CreateResponseDiskEntry(response.resp, getDiskEntry(path, response));
+    }
+
+    public Future<SMB2CreateResponse> openRequest(String path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+        SmbPath pathAndFile = new SmbPath(smbPath, path);
+        return super.createRequest(pathAndFile, oplockLevel, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions);
     }
 
     @Override
@@ -211,17 +214,6 @@ public class DiskShare extends Share {
             createDisposition,
             actualCreateOptions
         );
-    }
-
-    /***
-     * Closing the file by fileId and remove it from the openedFileMap.
-     * @param fileId the fileId of the target to close file
-     * @throws SMBApiException
-     */
-    @Override
-    void closeFileId(SMB2FileId fileId) throws SMBApiException {
-        super.closeFileId(fileId);
-        openedFileMap.remove(fileId);
     }
 
     /**
@@ -534,20 +526,12 @@ public class DiskShare extends Share {
             final SMB2OplockBreakLevel oplockLevel = oplockBreakNotification.getOplockLevel();
             logger.debug("FileId {} received OplockBreakNotification, Oplock level {}", fileId, oplockLevel);
 
-            DiskEntry diskEntry = openedFileMap.get(fileId);
-            if(diskEntry != null) {
-                final SMB2OplockLevel levelBeforeBreak = diskEntry.getOplockLevel();
-                diskEntry.setOplockBreakLevel(oplockLevel);
-            }else {
-                logger.warn("FileId {}, diskEntry not exist to handle Oplock Break.");
-            }
-
             if(oplockBreakNotificationHandler != null) {
                 // Preventing the improper use of handler (holding the thread). if holding thread, timeout exception will be throw.
                 oplockBreakNotifyExecutor.submit(new Runnable() {
                     @Override
                     public void run() {
-                        oplockBreakNotificationHandler.handle(SMB2_OPLOCK_BREAK_NOTIFICATION, oplockLevel, fileId);
+                        oplockBreakNotificationHandler.handle(SMB2_OPLOCK_BREAK_NOTIFICATION, oplockLevel, fileId, null);
                     }
                 });
             }else {
@@ -577,7 +561,7 @@ public class DiskShare extends Share {
             oplockBreakNotifyExecutor.submit(new Runnable() {
                 @Override
                 public void run() {
-                    oplockBreakNotificationHandler.handle(SMB2_CREATE_RESPONSE, null, createResponsePendingWithOplock.getFileId());
+                    oplockBreakNotificationHandler.handle(SMB2_CREATE_RESPONSE, null, createResponsePendingWithOplock.getFileId(), createResponsePendingWithOplock.getFuture());
                 }
             });
         }else {
@@ -604,6 +588,29 @@ public class DiskShare extends Share {
         public SMB2CreateResponseContext(SMB2CreateResponse resp, DiskShare share) {
             this.resp = resp;
             this.share = share;
+        }
+    }
+
+    /**
+     * A return object for the {@link #openWithResponse(String, SMB2OplockLevel, SMB2ImpersonationLevel, Set, Set, Set, SMB2CreateDisposition, Set)} call.
+     *
+     * This object wraps the {@link SMB2CreateResponse} and the diskEntry instance {@link DiskEntry}.
+     */
+    public class SMB2CreateResponseDiskEntry {
+        final SMB2CreateResponse resp;
+        final DiskEntry diskEntry;
+
+        public SMB2CreateResponseDiskEntry(SMB2CreateResponse resp, DiskEntry diskEntry) {
+            this.resp = resp;
+            this.diskEntry = diskEntry;
+        }
+
+        public SMB2CreateResponse getCreateResponse() {
+            return resp;
+        }
+
+        public DiskEntry getDiskEntry() {
+            return diskEntry;
         }
     }
 }

@@ -25,6 +25,7 @@ import com.hierynomus.mssmb2.messages.*;
 import com.hierynomus.protocol.commons.Factory;
 import com.hierynomus.protocol.commons.buffer.Buffer;
 import com.hierynomus.protocol.commons.concurrent.CancellableFuture;
+import com.hierynomus.protocol.commons.concurrent.FutureWrapper;
 import com.hierynomus.protocol.commons.concurrent.Futures;
 import com.hierynomus.protocol.transport.*;
 import com.hierynomus.smb.SMBPacket;
@@ -425,7 +426,8 @@ public class Connection implements Closeable, PacketReceiver<SMBPacket<?>> {
                smb2CreateResponse.getOplockLevel() != SMB2OplockLevel.SMB2_OPLOCK_LEVEL_NONE &&
                smb2CreateResponse.getFileId() != null) {
                 logger.debug("Received SMB2CreateResponse Packet for FileId {} with OplockLevel {}", smb2CreateResponse.getFileId(), smb2CreateResponse.getOplockLevel());
-                bus.publish(new CreateResponsePendingWithOplock(smb2CreateResponse.getFileId()));
+                Future<SMB2CreateResponse> future = new FutureWrapper<>(outstandingRequests.getRequestByMessageId(messageId).getPromise().future());
+                bus.publish(new CreateResponsePendingWithOplock(smb2CreateResponse.getFileId(), future));
             }else {
                 // just ignore it, if it didn't granted any oplock.
                 if(smb2CreateResponse.getFileId() == null && smb2CreateResponse.getOplockLevel() == null) {

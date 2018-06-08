@@ -139,6 +139,22 @@ public class Share implements AutoCloseable {
         return resp;
     }
 
+    Future<SMB2CreateResponse> createRequest(SmbPath path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+        SMB2CreateRequest cr = new SMB2CreateRequest(
+            dialect,
+            sessionId, treeId,
+            oplockLevel,
+            impersonationLevel,
+            accessMask,
+            fileAttributes,
+            shareAccess,
+            createDisposition,
+            createOptions,
+            path
+        );
+        return send(cr);
+    }
+
     protected Set<NtStatus> getCreateSuccessStatus() {
         return SUCCESS_OR_SYMLINK;
     }
