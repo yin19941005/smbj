@@ -262,6 +262,20 @@ public class Session implements AutoCloseable {
         return connection.send(packetSignatory.sign(packet));
     }
 
+    /***
+     * send a packet and return the corresponding messageId. The packet will be signed or not depending on the session's flags. Currently, only support SMB2CreateRequest.
+     *
+     * @param packet SMBPacket to send
+     * @return a Future to be used to retrieve the response packet
+     * @throws TransportException
+     */
+    public long sendAsyncMessageId(SMB2Packet packet) throws TransportException {
+        if (signingRequired && !packetSignatory.isInitialized()) {
+            throw new TransportException("Message signing is required, but no signing key is negotiated");
+        }
+        return connection.sendAsyncMessageId(packet);
+    }
+
     public <T extends SMB2Packet> T processSendResponse(SMB2CreateRequest packet) throws TransportException {
         Future<T> responseFuture = send(packet);
         return Futures.get(responseFuture, SMBRuntimeException.Wrapper);

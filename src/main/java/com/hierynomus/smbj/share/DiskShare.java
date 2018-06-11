@@ -35,10 +35,11 @@ import com.hierynomus.smbj.SMBClient;
 import com.hierynomus.smbj.common.SMBRuntimeException;
 import com.hierynomus.smbj.common.SmbPath;
 import com.hierynomus.smbj.connection.Connection;
-import com.hierynomus.smbj.event.CreateResponsePendingWithOplock;
+import com.hierynomus.smbj.event.AsyncCreateResponsePending;
+import com.hierynomus.smbj.event.AsyncCreateRequestPending;
 import com.hierynomus.smbj.event.OplockBreakNotification;
 import com.hierynomus.smbj.event.SMBEventBus;
-import com.hierynomus.smbj.event.handler.OplockBreakNotificationHandler;
+import com.hierynomus.smbj.event.handler.NotificationHandler;
 import com.hierynomus.smbj.paths.PathResolveException;
 import com.hierynomus.smbj.paths.PathResolver;
 import com.hierynomus.smbj.session.Session;
@@ -67,12 +68,10 @@ import static com.hierynomus.mssmb2.SMB2CreateOptions.FILE_DIRECTORY_FILE;
 import static com.hierynomus.mssmb2.SMB2CreateOptions.FILE_NON_DIRECTORY_FILE;
 import static com.hierynomus.mssmb2.SMB2ShareAccess.*;
 import static com.hierynomus.mssmb2.messages.SMB2QueryInfoRequest.SMB2QueryInfoType.SMB2_0_INFO_SECURITY;
+import static com.hierynomus.smbj.event.handler.NotificationMessageType.SMB2_CREATE_REQUEST;
+import static com.hierynomus.smbj.event.handler.NotificationMessageType.SMB2_CREATE_RESPONSE;
+import static com.hierynomus.smbj.event.handler.NotificationMessageType.SMB2_OPLOCK_BREAK_NOTIFICATION;
 
-
-import static com.hierynomus.smbj.event.handler.OplockBreakNotificationHandlerType
-    .SMB2_CREATE_RESPONSE;
-import static com.hierynomus.smbj.event.handler.OplockBreakNotificationHandlerType
-    .SMB2_OPLOCK_BREAK_NOTIFICATION;
 import static java.util.EnumSet.of;
 import static java.util.EnumSet.noneOf;
 
@@ -80,9 +79,9 @@ public class DiskShare extends Share {
     private static final Logger logger = LoggerFactory.getLogger(DiskShare.class);
     private final PathResolver resolver;
     private SMBEventBus bus;
-    private OplockBreakNotificationHandler oplockBreakNotificationHandler = null;
+    private NotificationHandler notificationHandler = null;
 
-    private final ExecutorService oplockBreakNotifyExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
+    private final ExecutorService notifyExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
         @Override
         public Thread newThread(Runnable r) {
             Thread t = Executors.defaultThreadFactory().newThread(r);
@@ -105,7 +104,7 @@ public class DiskShare extends Share {
     public void close() throws IOException {
         super.close();
         // cleanup for executor
-        oplockBreakNotifyExecutor.shutdown();
+        notifyExecutor.shutdown();
     }
 
     public DiskEntry open(String path, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
@@ -123,9 +122,40 @@ public class DiskShare extends Share {
         return new SMB2CreateResponseDiskEntry(response.resp, getDiskEntry(path, response));
     }
 
-    public Future<SMB2CreateResponse> openRequest(String path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+    /***
+     * Send a create request and return a Future for create response. User are required to deal with DFS issue by himself.
+     *
+     * @param path target file path
+     * @param oplockLevel requesting oplock level
+     * @param impersonationLevel requesting impersonation level
+     * @param accessMask desired access
+     * @param attributes file attributes
+     * @param shareAccesses the share access of this create request
+     * @param createDisposition create disposition of this create request
+     * @param createOptions create options of this create request
+     * @return a Future to be used to retrieve the create response packet
+     */
+    public Future<SMB2CreateResponse> openAsync(String path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
         SmbPath pathAndFile = new SmbPath(smbPath, path);
-        return super.createRequest(pathAndFile, oplockLevel, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions);
+        return super.createAsync(pathAndFile, oplockLevel, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions);
+    }
+
+    /***
+     * Send a create request and return messageId for create response. User are required to deal with DFS issue by himself.
+     *
+     * @param path target file path
+     * @param oplockLevel requesting oplock level
+     * @param impersonationLevel requesting impersonation level
+     * @param accessMask desired access
+     * @param attributes file attributes
+     * @param shareAccesses the share access of this create request
+     * @param createDisposition create disposition of this create request
+     * @param createOptions create options of this create request
+     * @return messageId to be used to retrieve the create response packet
+     */
+    public long openAsyncMessageId(String path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+        SmbPath pathAndFile = new SmbPath(smbPath, path);
+        return super.createAsyncMessageId(pathAndFile, oplockLevel, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions);
     }
 
     @Override
@@ -508,8 +538,8 @@ public class DiskShare extends Share {
      *
      * @param handler handler for Receiving an Oplock Break Notification
      */
-    public void setOplockBreakNotificationHandler(OplockBreakNotificationHandler handler) {
-        this.oplockBreakNotificationHandler = handler;
+    public void setNotificationHandler(NotificationHandler handler) {
+        this.notificationHandler = handler;
     }
 
     /***
@@ -526,17 +556,22 @@ public class DiskShare extends Share {
             final SMB2OplockBreakLevel oplockLevel = oplockBreakNotification.getOplockLevel();
             logger.debug("FileId {} received OplockBreakNotification, Oplock level {}", fileId, oplockLevel);
 
-            if(oplockBreakNotificationHandler != null) {
+            if(notificationHandler != null) {
                 // Preventing the improper use of handler (holding the thread). if holding thread, timeout exception will be throw.
-                oplockBreakNotifyExecutor.submit(new Runnable() {
+                notifyExecutor.submit(new Runnable() {
                     @Override
                     public void run() {
-                        oplockBreakNotificationHandler.handle(SMB2_OPLOCK_BREAK_NOTIFICATION, oplockLevel, fileId, null);
+                        notificationHandler.handle(SMB2_OPLOCK_BREAK_NOTIFICATION,
+                                                   -1,
+                                                   fileId,
+                                                   null,
+                                                   null,
+                                                   oplockLevel);
                     }
                 });
             }else {
-                logger.warn("FileId {}, OplockBreakNotificationHandler not exist to handle Oplock Break.");
-                throw new IllegalStateException("OplockBreakNotificationHandler not exist to handle Oplock Break.");
+                logger.warn("FileId {}, NotificationHandler not exist to handle Oplock Break.", fileId);
+                throw new IllegalStateException("NotificationHandler not exist to handle Oplock Break.");
             }
 
         } catch (Throwable t) {
@@ -546,27 +581,58 @@ public class DiskShare extends Share {
     }
 
     /***
-     * Oplock related handler. Handler for handling create response granted oplock.
-     * This is intended to prevent oplock break too fast and not able to handle oplock break notification properly.
-     * Notify the client oplock is granted on createResponse but still under processing.
+     * Async create response handler.
      *
-     * @param createResponsePendingWithOplock the corresponding fileId had granted some level of oplock.
+     * @param asyncCreateRequestPending filePath with the corresponding messageId.
      */
     @Handler
     @SuppressWarnings("unused")
-    private void createResponsePendingWithOplock(final CreateResponsePendingWithOplock createResponsePendingWithOplock) {
-
-        if(oplockBreakNotificationHandler != null) {
+    private void createRequestPending(final AsyncCreateRequestPending asyncCreateRequestPending) {
+        if(notificationHandler != null) {
             // Preventing the improper use of handler (holding the thread). if holding thread, timeout exception will be throw.
-            oplockBreakNotifyExecutor.submit(new Runnable() {
+            notifyExecutor.submit(new Runnable() {
                 @Override
                 public void run() {
-                    oplockBreakNotificationHandler.handle(SMB2_CREATE_RESPONSE, null, createResponsePendingWithOplock.getFileId(), createResponsePendingWithOplock.getFuture());
+                    notificationHandler.handle(SMB2_CREATE_REQUEST,
+                                               asyncCreateRequestPending.getMessageId(),
+                                               null,
+                                               asyncCreateRequestPending.getPath(),
+                                               null,
+                                               null);
                 }
             });
         }else {
-            logger.warn("FileId {}, OplockBreakNotificationHandler not exist to handle Create Response with Oplock.");
-            throw new IllegalStateException("OplockBreakNotificationHandler not exist to handle Create Response with Oplock.");
+            logger.debug("NotificationHandler not exist to handle asyncCreateRequestPending");
+        }
+    }
+
+    /***
+     * Async create response handler. This is also a oplock related handler.
+     * Passing the createResponse Future to the client.
+     * This is also intended to prevent oplock break too fast and not able to handle oplock break notification properly.
+     * Notify the client oplock is granted on createResponse but still under processing.
+     *
+     * @param asyncCreateResponsePending the corresponding messageId and fileId with the Future of createResponse.
+     */
+    @Handler
+    @SuppressWarnings("unused")
+    private void createResponsePending(final AsyncCreateResponsePending asyncCreateResponsePending) {
+
+        if(notificationHandler != null) {
+            // Preventing the improper use of handler (holding the thread). if holding thread, timeout exception will be throw.
+            notifyExecutor.submit(new Runnable() {
+                @Override
+                public void run() {
+                    notificationHandler.handle(SMB2_CREATE_RESPONSE,
+                                               asyncCreateResponsePending.getMessageId(),
+                                               asyncCreateResponsePending.getFileId(),
+                                               null,
+                                               asyncCreateResponsePending.getFuture(),
+                                               null);
+                }
+            });
+        }else {
+            logger.debug("NotificationHandler not exist to handle asyncCreateResponsePending");
         }
 
     }

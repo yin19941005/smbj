@@ -139,7 +139,7 @@ public class Share implements AutoCloseable {
         return resp;
     }
 
-    Future<SMB2CreateResponse> createRequest(SmbPath path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+    Future<SMB2CreateResponse> createAsync(SmbPath path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
         SMB2CreateRequest cr = new SMB2CreateRequest(
             dialect,
             sessionId, treeId,
@@ -153,6 +153,22 @@ public class Share implements AutoCloseable {
             path
         );
         return send(cr);
+    }
+
+    long createAsyncMessageId(SmbPath path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+        SMB2CreateRequest cr = new SMB2CreateRequest(
+            dialect,
+            sessionId, treeId,
+            oplockLevel,
+            impersonationLevel,
+            accessMask,
+            fileAttributes,
+            shareAccess,
+            createDisposition,
+            createOptions,
+            path
+        );
+        return sendAsynMessageId(cr);
     }
 
     protected Set<NtStatus> getCreateSuccessStatus() {
@@ -368,6 +384,18 @@ public class Share implements AutoCloseable {
 
         try {
             return session.send(request);
+        } catch (TransportException e) {
+            throw new SMBRuntimeException(e);
+        }
+    }
+
+    private long sendAsynMessageId(SMB2Packet request) {
+        if (!isConnected()) {
+            throw new SMBRuntimeException(getClass().getSimpleName() + " has already been closed");
+        }
+
+        try {
+            return session.sendAsyncMessageId(request);
         } catch (TransportException e) {
             throw new SMBRuntimeException(e);
         }

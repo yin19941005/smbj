@@ -35,8 +35,10 @@ import com.hierynomus.smbj.auth.AuthenticateResponse;
 import com.hierynomus.smbj.auth.AuthenticationContext;
 import com.hierynomus.smbj.auth.Authenticator;
 import com.hierynomus.smbj.common.SMBRuntimeException;
+import com.hierynomus.smbj.common.SmbPath;
+import com.hierynomus.smbj.event.AsyncCreateResponsePending;
 import com.hierynomus.smbj.event.ConnectionClosed;
-import com.hierynomus.smbj.event.CreateResponsePendingWithOplock;
+import com.hierynomus.smbj.event.AsyncCreateRequestPending;
 import com.hierynomus.smbj.event.OplockBreakNotification;
 import com.hierynomus.smbj.event.SMBEventBus;
 import com.hierynomus.smbj.event.SessionLoggedOff;
@@ -253,23 +255,55 @@ public class Connection implements Closeable, PacketReceiver<SMBPacket<?>> {
     public <T extends SMB2Packet> Future<T> send(SMB2Packet packet) throws TransportException {
         lock.lock();
         try {
-            int availableCredits = sequenceWindow.available();
-            int grantCredits = calculateGrantedCredits(packet, availableCredits);
-            if (availableCredits == 0) {
-                logger.warn("There are no credits left to send {}, will block until there are more credits available.", packet.getHeader().getMessage());
-            }
-            long[] messageIds = sequenceWindow.get(grantCredits);
-            packet.getHeader().setMessageId(messageIds[0]);
-            logger.debug("Granted {} (out of {}) credits to {}", grantCredits, availableCredits, packet);
-            packet.getHeader().setCreditRequest(Math.max(SequenceWindow.PREFERRED_MINIMUM_CREDITS - availableCredits - grantCredits, grantCredits));
-
-            Request request = new Request(packet.getHeader().getMessageId(), UUID.randomUUID());
-            outstandingRequests.registerOutstanding(request);
-            transport.write(packet);
-            return request.getFuture(new CancelRequest(request));
+            return actualSend(packet);
         } finally {
             lock.unlock();
         }
+    }
+
+    /***
+     * Send a packet and return the corresponding messageId. Currently, only support SMB2CreateRequest
+     *
+     * @param packet SMBPacket to send
+     * @return messageId to be used to retrieve the response packet
+     * @throws TransportException When a transport level error occurred
+     */
+    public long sendAsyncMessageId(SMB2Packet packet) throws TransportException {
+        lock.lock();
+        try {
+            actualSend(packet);
+            if(!(packet instanceof SMB2CreateRequest)) {
+                logger.debug("Asyn send and return messageId only is not supported for this type of request.");
+            }
+            return packet.getHeader().getMessageId();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private <T extends SMB2Packet> Future<T> actualSend(SMB2Packet packet)
+        throws TransportException {
+        int availableCredits = sequenceWindow.available();
+        int grantCredits = calculateGrantedCredits(packet, availableCredits);
+        if (availableCredits == 0) {
+            logger.warn("There are no credits left to send {}, will block until there are more credits available.", packet.getHeader().getMessage());
+        }
+        long[] messageIds = sequenceWindow.get(grantCredits);
+        packet.getHeader().setMessageId(messageIds[0]);
+        logger.debug("Granted {} (out of {}) credits to {}", grantCredits, availableCredits, packet);
+        packet.getHeader().setCreditRequest(Math.max(SequenceWindow.PREFERRED_MINIMUM_CREDITS - availableCredits - grantCredits, grantCredits));
+
+        if(packet instanceof SMB2CreateRequest) {
+            SMB2CreateRequest createRequest = (SMB2CreateRequest)packet;
+            long messageId = packet.getHeader().getMessageId();
+            SmbPath path = createRequest.getPath();
+            bus.publish(new AsyncCreateRequestPending(messageId, path));
+        }
+
+        Request request = new Request(packet.getHeader().getMessageId(), UUID.randomUUID());
+        outstandingRequests.registerOutstanding(request);
+        transport.write(packet);
+        return request.getFuture(new CancelRequest(request));
     }
 
     private <T extends SMB2Packet> T sendAndReceive(SMB2Packet packet) throws TransportException {
@@ -420,24 +454,28 @@ public class Connection implements Closeable, PacketReceiver<SMBPacket<?>> {
 
         // Handing case for Oplock/Lease related issue
         if(packet instanceof SMB2CreateResponse) {
-            // Notify the diskShare this is on processing/pending createResponse. Don't discard the corresponding oplockBreakNotification.
             SMB2CreateResponse smb2CreateResponse = (SMB2CreateResponse)packet;
-            if(smb2CreateResponse.getOplockLevel() != null &&
-               smb2CreateResponse.getOplockLevel() != SMB2OplockLevel.SMB2_OPLOCK_LEVEL_NONE &&
-               smb2CreateResponse.getFileId() != null) {
-                logger.debug("Received SMB2CreateResponse Packet for FileId {} with OplockLevel {}", smb2CreateResponse.getFileId(), smb2CreateResponse.getOplockLevel());
-                Future<SMB2CreateResponse> future = new FutureWrapper<>(outstandingRequests.getRequestByMessageId(messageId).getPromise().future());
-                bus.publish(new CreateResponsePendingWithOplock(smb2CreateResponse.getFileId(), future));
-            }else {
-                // just ignore it, if it didn't granted any oplock.
-                if(smb2CreateResponse.getFileId() == null && smb2CreateResponse.getOplockLevel() == null) {
-                    logger.debug("Received null for both fileId and oplockLevel on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
-                }else if(smb2CreateResponse.getFileId() == null) {
-                    logger.debug("Received null for fileId on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
-                }else if(smb2CreateResponse.getOplockLevel() == null) {
-                    logger.debug("Received null for oplockLevel on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
-                }
-            }
+            Future<SMB2CreateResponse> future = new FutureWrapper<>(outstandingRequests.getRequestByMessageId(messageId).getPromise().future());
+            bus.publish(new AsyncCreateResponsePending(messageId, smb2CreateResponse.getFileId(), future));
+
+            // Notify the diskShare this is on processing/pending createResponse. Don't discard the corresponding oplockBreakNotification.
+//            SMB2CreateResponse smb2CreateResponse = (SMB2CreateResponse)packet;
+//            if(smb2CreateResponse.getOplockLevel() != null &&
+//               smb2CreateResponse.getOplockLevel() != SMB2OplockLevel.SMB2_OPLOCK_LEVEL_NONE &&
+//               smb2CreateResponse.getFileId() != null) {
+//                logger.debug("Received SMB2CreateResponse Packet for FileId {} with OplockLevel {}", smb2CreateResponse.getFileId(), smb2CreateResponse.getOplockLevel());
+//                Future<SMB2CreateResponse> future = new FutureWrapper<>(outstandingRequests.getRequestByMessageId(messageId).getPromise().future());
+//                bus.publish(new AsyncCreateResponsePending(messageId, smb2CreateResponse.getFileId(), future));
+//            }else {
+//                // just ignore it, if it didn't granted any oplock.
+//                if(smb2CreateResponse.getFileId() == null && smb2CreateResponse.getOplockLevel() == null) {
+//                    logger.debug("Received null for both fileId and oplockLevel on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
+//                }else if(smb2CreateResponse.getFileId() == null) {
+//                    logger.debug("Received null for fileId on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
+//                }else if(smb2CreateResponse.getOplockLevel() == null) {
+//                    logger.debug("Received null for oplockLevel on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
+//                }
+//            }
         }
 
         // [MS-SMB2].pdf 3.2.5.1.8 Processing the Response
