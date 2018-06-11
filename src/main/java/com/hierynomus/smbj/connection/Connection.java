@@ -457,25 +457,6 @@ public class Connection implements Closeable, PacketReceiver<SMBPacket<?>> {
             SMB2CreateResponse smb2CreateResponse = (SMB2CreateResponse)packet;
             Future<SMB2CreateResponse> future = new FutureWrapper<>(outstandingRequests.getRequestByMessageId(messageId).getPromise().future());
             bus.publish(new AsyncCreateResponsePending(messageId, smb2CreateResponse.getFileId(), future));
-
-            // Notify the diskShare this is on processing/pending createResponse. Don't discard the corresponding oplockBreakNotification.
-//            SMB2CreateResponse smb2CreateResponse = (SMB2CreateResponse)packet;
-//            if(smb2CreateResponse.getOplockLevel() != null &&
-//               smb2CreateResponse.getOplockLevel() != SMB2OplockLevel.SMB2_OPLOCK_LEVEL_NONE &&
-//               smb2CreateResponse.getFileId() != null) {
-//                logger.debug("Received SMB2CreateResponse Packet for FileId {} with OplockLevel {}", smb2CreateResponse.getFileId(), smb2CreateResponse.getOplockLevel());
-//                Future<SMB2CreateResponse> future = new FutureWrapper<>(outstandingRequests.getRequestByMessageId(messageId).getPromise().future());
-//                bus.publish(new AsyncCreateResponsePending(messageId, smb2CreateResponse.getFileId(), future));
-//            }else {
-//                // just ignore it, if it didn't granted any oplock.
-//                if(smb2CreateResponse.getFileId() == null && smb2CreateResponse.getOplockLevel() == null) {
-//                    logger.debug("Received null for both fileId and oplockLevel on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
-//                }else if(smb2CreateResponse.getFileId() == null) {
-//                    logger.debug("Received null for fileId on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
-//                }else if(smb2CreateResponse.getOplockLevel() == null) {
-//                    logger.debug("Received null for oplockLevel on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
-//                }
-//            }
         }
 
         // [MS-SMB2].pdf 3.2.5.1.8 Processing the Response
