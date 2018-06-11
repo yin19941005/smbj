@@ -164,7 +164,7 @@ public class DiskShare extends Share {
         }
     }
 
-    protected DiskEntry getDiskEntry(String path, SMB2CreateResponseContext responseContext) {
+    public DiskEntry getDiskEntry(String path, SMB2CreateResponseContext responseContext) {
         SMB2CreateResponse response = responseContext.resp;
         if (response.getFileAttributes().contains(FILE_ATTRIBUTE_DIRECTORY)) {
             return new Directory(response.getFileId(), responseContext.share, path, response.getOplockLevel());
