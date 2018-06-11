@@ -581,7 +581,7 @@ public class DiskShare extends Share {
      *
      * This object wraps the {@link SMB2CreateResponse} and the actual {@link Share} which generated it if the path needed to be resolved.
      */
-    static class SMB2CreateResponseContext {
+    public static class SMB2CreateResponseContext {
         final SMB2CreateResponse resp;
         final DiskShare share;
 
@@ -596,7 +596,7 @@ public class DiskShare extends Share {
      *
      * This object wraps the {@link SMB2CreateResponse} and the diskEntry instance {@link DiskEntry}.
      */
-    public class SMB2CreateResponseDiskEntry {
+    public static class SMB2CreateResponseDiskEntry {
         final SMB2CreateResponse resp;
         final DiskEntry diskEntry;
 
