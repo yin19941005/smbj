@@ -31,6 +31,7 @@ import com.hierynomus.smbj.common.SMBRuntimeException;
 import com.hierynomus.smbj.common.SmbPath;
 import com.hierynomus.smbj.connection.Connection;
 import com.hierynomus.smbj.connection.NegotiatedProtocol;
+import com.hierynomus.smbj.event.handler.MessageIdCallback;
 import com.hierynomus.smbj.io.ArrayByteChunkProvider;
 import com.hierynomus.smbj.io.ByteChunkProvider;
 import com.hierynomus.smbj.io.EmptyByteChunkProvider;
@@ -139,7 +140,7 @@ public class Share implements AutoCloseable {
         return resp;
     }
 
-    Future<SMB2CreateResponse> createAsync(SmbPath path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+    Future<SMB2CreateResponse> createAsync(SmbPath path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions, MessageIdCallback messageIdCallback) {
         SMB2CreateRequest cr = new SMB2CreateRequest(
             dialect,
             sessionId, treeId,
@@ -152,23 +153,7 @@ public class Share implements AutoCloseable {
             createOptions,
             path
         );
-        return send(cr);
-    }
-
-    long createAsyncMessageId(SmbPath path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
-        SMB2CreateRequest cr = new SMB2CreateRequest(
-            dialect,
-            sessionId, treeId,
-            oplockLevel,
-            impersonationLevel,
-            accessMask,
-            fileAttributes,
-            shareAccess,
-            createDisposition,
-            createOptions,
-            path
-        );
-        return sendAsynMessageId(cr);
+        return send(cr, messageIdCallback);
     }
 
     protected Set<NtStatus> getCreateSuccessStatus() {
@@ -378,24 +363,16 @@ public class Share implements AutoCloseable {
     }
 
     private <T extends SMB2Packet> Future<T> send(SMB2Packet request) {
-        if (!isConnected()) {
-            throw new SMBRuntimeException(getClass().getSimpleName() + " has already been closed");
-        }
-
-        try {
-            return session.send(request);
-        } catch (TransportException e) {
-            throw new SMBRuntimeException(e);
-        }
+        return send(request, null);
     }
 
-    private long sendAsynMessageId(SMB2Packet request) {
+    private <T extends SMB2Packet> Future<T> send(SMB2Packet request, MessageIdCallback messageIdCallback) {
         if (!isConnected()) {
             throw new SMBRuntimeException(getClass().getSimpleName() + " has already been closed");
         }
 
         try {
-            return session.sendAsyncMessageId(request);
+            return session.send(request, messageIdCallback);
         } catch (TransportException e) {
             throw new SMBRuntimeException(e);
         }

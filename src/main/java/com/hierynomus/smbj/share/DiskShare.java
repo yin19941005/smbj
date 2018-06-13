@@ -39,6 +39,7 @@ import com.hierynomus.smbj.event.AsyncCreateResponsePending;
 import com.hierynomus.smbj.event.AsyncCreateRequestPending;
 import com.hierynomus.smbj.event.OplockBreakNotification;
 import com.hierynomus.smbj.event.SMBEventBus;
+import com.hierynomus.smbj.event.handler.MessageIdCallback;
 import com.hierynomus.smbj.event.handler.NotificationHandler;
 import com.hierynomus.smbj.paths.PathResolveException;
 import com.hierynomus.smbj.paths.PathResolver;
@@ -136,12 +137,11 @@ public class DiskShare extends Share {
      * @return a Future to be used to retrieve the create response packet
      */
     public Future<SMB2CreateResponse> openAsync(String path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
-        SmbPath pathAndFile = new SmbPath(smbPath, path);
-        return super.createAsync(pathAndFile, oplockLevel, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions);
+        return openAsync(path, oplockLevel, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions, null);
     }
 
     /***
-     * Send a create request and return messageId for create response. User are required to deal with DFS issue by himself.
+     * Send a create request and callback for messageId for create response. User are required to deal with DFS issue by himself.
      *
      * @param path target file path
      * @param oplockLevel requesting oplock level
@@ -151,11 +151,12 @@ public class DiskShare extends Share {
      * @param shareAccesses the share access of this create request
      * @param createDisposition create disposition of this create request
      * @param createOptions create options of this create request
-     * @return messageId to be used to retrieve the create response packet
+     * @param messageIdCallback callback to return corresponding messageId
+     * @return a Future to be used to retrieve the create response packet
      */
-    public long openAsyncMessageId(String path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
+    public Future<SMB2CreateResponse> openAsync(String path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions, MessageIdCallback messageIdCallback) {
         SmbPath pathAndFile = new SmbPath(smbPath, path);
-        return super.createAsyncMessageId(pathAndFile, oplockLevel, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions);
+        return super.createAsync(pathAndFile, oplockLevel, impersonationLevel, accessMask, attributes, shareAccesses, createDisposition, createOptions, messageIdCallback);
     }
 
     @Override

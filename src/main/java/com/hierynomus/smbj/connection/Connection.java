@@ -42,6 +42,7 @@ import com.hierynomus.smbj.event.AsyncCreateRequestPending;
 import com.hierynomus.smbj.event.OplockBreakNotification;
 import com.hierynomus.smbj.event.SMBEventBus;
 import com.hierynomus.smbj.event.SessionLoggedOff;
+import com.hierynomus.smbj.event.handler.MessageIdCallback;
 import com.hierynomus.smbj.session.Session;
 import com.hierynomus.spnego.NegTokenInit;
 import com.hierynomus.spnego.SpnegoException;
@@ -253,57 +254,49 @@ public class Connection implements Closeable, PacketReceiver<SMBPacket<?>> {
      * @throws TransportException When a transport level error occurred
      */
     public <T extends SMB2Packet> Future<T> send(SMB2Packet packet) throws TransportException {
-        lock.lock();
-        try {
-            return actualSend(packet);
-        } finally {
-            lock.unlock();
-        }
+        return send(packet, null);
     }
 
     /***
-     * Send a packet and return the corresponding messageId. Currently, only support SMB2CreateRequest
+     * Send a packet and callback for the corresponding messageId. Currently, only support SMB2CreateRequest
      *
      * @param packet SMBPacket to send
-     * @return messageId to be used to retrieve the response packet
+     * @param messageIdCallback callback to return corresponding messageId
+     * @return a Future to be used to retrieve the response packet
      * @throws TransportException When a transport level error occurred
      */
-    public long sendAsyncMessageId(SMB2Packet packet) throws TransportException {
+    public <T extends SMB2Packet> Future<T> send(SMB2Packet packet, MessageIdCallback messageIdCallback) throws TransportException {
         lock.lock();
         try {
-            actualSend(packet);
-            if(!(packet instanceof SMB2CreateRequest)) {
-                logger.debug("Asyn send and return messageId only is not supported for this type of request.");
+            int availableCredits = sequenceWindow.available();
+            int grantCredits = calculateGrantedCredits(packet, availableCredits);
+            if (availableCredits == 0) {
+                logger.warn("There are no credits left to send {}, will block until there are more credits available.", packet.getHeader().getMessage());
             }
-            return packet.getHeader().getMessageId();
+            long[] messageIds = sequenceWindow.get(grantCredits);
+            packet.getHeader().setMessageId(messageIds[0]);
+            logger.debug("Granted {} (out of {}) credits to {}", grantCredits, availableCredits, packet);
+            packet.getHeader().setCreditRequest(Math.max(SequenceWindow.PREFERRED_MINIMUM_CREDITS - availableCredits - grantCredits, grantCredits));
+
+            long messageId = packet.getHeader().getMessageId();
+
+            if(messageIdCallback != null) {
+                messageIdCallback.callback(messageId);
+            }
+
+            if(packet instanceof SMB2CreateRequest) {
+                SMB2CreateRequest createRequest = (SMB2CreateRequest)packet;
+                SmbPath path = createRequest.getPath();
+                bus.publish(new AsyncCreateRequestPending(messageId, path));
+            }
+
+            Request request = new Request(messageId, UUID.randomUUID());
+            outstandingRequests.registerOutstanding(request);
+            transport.write(packet);
+            return request.getFuture(new CancelRequest(request));
         } finally {
             lock.unlock();
         }
-    }
-
-    private <T extends SMB2Packet> Future<T> actualSend(SMB2Packet packet)
-        throws TransportException {
-        int availableCredits = sequenceWindow.available();
-        int grantCredits = calculateGrantedCredits(packet, availableCredits);
-        if (availableCredits == 0) {
-            logger.warn("There are no credits left to send {}, will block until there are more credits available.", packet.getHeader().getMessage());
-        }
-        long[] messageIds = sequenceWindow.get(grantCredits);
-        packet.getHeader().setMessageId(messageIds[0]);
-        logger.debug("Granted {} (out of {}) credits to {}", grantCredits, availableCredits, packet);
-        packet.getHeader().setCreditRequest(Math.max(SequenceWindow.PREFERRED_MINIMUM_CREDITS - availableCredits - grantCredits, grantCredits));
-
-        if(packet instanceof SMB2CreateRequest) {
-            SMB2CreateRequest createRequest = (SMB2CreateRequest)packet;
-            long messageId = packet.getHeader().getMessageId();
-            SmbPath path = createRequest.getPath();
-            bus.publish(new AsyncCreateRequestPending(messageId, path));
-        }
-
-        Request request = new Request(packet.getHeader().getMessageId(), UUID.randomUUID());
-        outstandingRequests.registerOutstanding(request);
-        transport.write(packet);
-        return request.getFuture(new CancelRequest(request));
     }
 
     private <T extends SMB2Packet> T sendAndReceive(SMB2Packet packet) throws TransportException {
