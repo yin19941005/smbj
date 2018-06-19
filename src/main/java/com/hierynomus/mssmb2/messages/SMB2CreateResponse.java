@@ -41,6 +41,8 @@ public class SMB2CreateResponse extends SMB2Packet {
     private FileTime lastAccessTime;
     private FileTime lastWriteTime;
     private FileTime changeTime;
+    private long allocationSize;
+    private long endOfFile;
     private Set<FileAttributes> fileAttributes;
     private SMB2FileId fileId;
 
@@ -54,8 +56,8 @@ public class SMB2CreateResponse extends SMB2Packet {
         lastAccessTime = MsDataTypes.readFileTime(buffer); // LastAccessTime (8 bytes)
         lastWriteTime = MsDataTypes.readFileTime(buffer); // LastWriteTime (8 bytes)
         changeTime = MsDataTypes.readFileTime(buffer); // ChangeTime (8 bytes)
-        buffer.readRawBytes(8); // AllocationSize (8 bytes) - Ignore
-        buffer.readRawBytes(8); // EndOfFile (8 bytes)
+        allocationSize = buffer.readLong(); // AllocationSize (8 bytes)
+        endOfFile = buffer.readUInt64(); // EndOfFile (8 bytes)
         fileAttributes = toEnumSet(buffer.readUInt32(), FileAttributes.class); // FileAttributes (4 bytes)
         buffer.skip(4); // Reserved2 (4 bytes)
         fileId = SMB2FileId.read(buffer); // FileId (16 bytes)
@@ -87,6 +89,14 @@ public class SMB2CreateResponse extends SMB2Packet {
 
     public FileTime getChangeTime() {
         return changeTime;
+    }
+
+    public long getAllocationSize() {
+        return allocationSize;
+    }
+
+    public long getEndOfFile() {
+        return endOfFile;
     }
 
     public Set<FileAttributes> getFileAttributes() {

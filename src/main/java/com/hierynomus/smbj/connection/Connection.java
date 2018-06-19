@@ -25,6 +25,7 @@ import com.hierynomus.mssmb2.messages.*;
 import com.hierynomus.protocol.commons.Factory;
 import com.hierynomus.protocol.commons.buffer.Buffer;
 import com.hierynomus.protocol.commons.concurrent.CancellableFuture;
+import com.hierynomus.protocol.commons.concurrent.FutureWrapper;
 import com.hierynomus.protocol.commons.concurrent.Futures;
 import com.hierynomus.protocol.transport.*;
 import com.hierynomus.smb.SMBPacket;
@@ -34,11 +35,14 @@ import com.hierynomus.smbj.auth.AuthenticateResponse;
 import com.hierynomus.smbj.auth.AuthenticationContext;
 import com.hierynomus.smbj.auth.Authenticator;
 import com.hierynomus.smbj.common.SMBRuntimeException;
+import com.hierynomus.smbj.common.SmbPath;
+import com.hierynomus.smbj.event.AsyncCreateResponsePending;
 import com.hierynomus.smbj.event.ConnectionClosed;
-import com.hierynomus.smbj.event.CreateResponsePendingWithOplock;
+import com.hierynomus.smbj.event.AsyncCreateRequestPending;
 import com.hierynomus.smbj.event.OplockBreakNotification;
 import com.hierynomus.smbj.event.SMBEventBus;
 import com.hierynomus.smbj.event.SessionLoggedOff;
+import com.hierynomus.smbj.event.handler.MessageIdCallback;
 import com.hierynomus.smbj.session.Session;
 import com.hierynomus.spnego.NegTokenInit;
 import com.hierynomus.spnego.SpnegoException;
@@ -250,6 +254,18 @@ public class Connection implements Closeable, PacketReceiver<SMBPacket<?>> {
      * @throws TransportException When a transport level error occurred
      */
     public <T extends SMB2Packet> Future<T> send(SMB2Packet packet) throws TransportException {
+        return send(packet, null);
+    }
+
+    /***
+     * Send a packet and callback for the corresponding messageId. Currently, only support SMB2CreateRequest
+     *
+     * @param packet SMBPacket to send
+     * @param messageIdCallback callback to return corresponding messageId
+     * @return a Future to be used to retrieve the response packet
+     * @throws TransportException When a transport level error occurred
+     */
+    public <T extends SMB2Packet> Future<T> send(SMB2Packet packet, MessageIdCallback messageIdCallback) throws TransportException {
         lock.lock();
         try {
             int availableCredits = sequenceWindow.available();
@@ -262,7 +278,19 @@ public class Connection implements Closeable, PacketReceiver<SMBPacket<?>> {
             logger.debug("Granted {} (out of {}) credits to {}", grantCredits, availableCredits, packet);
             packet.getHeader().setCreditRequest(Math.max(SequenceWindow.PREFERRED_MINIMUM_CREDITS - availableCredits - grantCredits, grantCredits));
 
-            Request request = new Request(packet.getHeader().getMessageId(), UUID.randomUUID());
+            long messageId = packet.getHeader().getMessageId();
+
+            if(messageIdCallback != null) {
+                messageIdCallback.callback(messageId);
+            }
+
+            if(packet instanceof SMB2CreateRequest) {
+                SMB2CreateRequest createRequest = (SMB2CreateRequest)packet;
+                SmbPath path = createRequest.getPath();
+                bus.publish(new AsyncCreateRequestPending(messageId, path));
+            }
+
+            Request request = new Request(messageId, UUID.randomUUID());
             outstandingRequests.registerOutstanding(request);
             transport.write(packet);
             return request.getFuture(new CancelRequest(request));
@@ -419,23 +447,9 @@ public class Connection implements Closeable, PacketReceiver<SMBPacket<?>> {
 
         // Handing case for Oplock/Lease related issue
         if(packet instanceof SMB2CreateResponse) {
-            // Notify the diskShare this is on processing/pending createResponse. Don't discard the corresponding oplockBreakNotification.
             SMB2CreateResponse smb2CreateResponse = (SMB2CreateResponse)packet;
-            if(smb2CreateResponse.getOplockLevel() != null &&
-               smb2CreateResponse.getOplockLevel() != SMB2OplockLevel.SMB2_OPLOCK_LEVEL_NONE &&
-               smb2CreateResponse.getFileId() != null) {
-                logger.debug("Received SMB2CreateResponse Packet for FileId {} with OplockLevel {}", smb2CreateResponse.getFileId(), smb2CreateResponse.getOplockLevel());
-                bus.publish(new CreateResponsePendingWithOplock(smb2CreateResponse.getFileId()));
-            }else {
-                // just ignore it, if it didn't granted any oplock.
-                if(smb2CreateResponse.getFileId() == null && smb2CreateResponse.getOplockLevel() == null) {
-                    logger.debug("Received null for both fileId and oplockLevel on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
-                }else if(smb2CreateResponse.getFileId() == null) {
-                    logger.debug("Received null for fileId on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
-                }else if(smb2CreateResponse.getOplockLevel() == null) {
-                    logger.debug("Received null for oplockLevel on smb2CreateResponse. NTSTATUS = " + smb2CreateResponse.getHeader().getStatus());
-                }
-            }
+            Future<SMB2CreateResponse> future = new FutureWrapper<>(outstandingRequests.getRequestByMessageId(messageId).getPromise().future());
+            bus.publish(new AsyncCreateResponsePending(messageId, smb2CreateResponse.getFileId(), future));
         }
 
         // [MS-SMB2].pdf 3.2.5.1.8 Processing the Response

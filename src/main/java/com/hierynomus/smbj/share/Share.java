@@ -31,6 +31,7 @@ import com.hierynomus.smbj.common.SMBRuntimeException;
 import com.hierynomus.smbj.common.SmbPath;
 import com.hierynomus.smbj.connection.Connection;
 import com.hierynomus.smbj.connection.NegotiatedProtocol;
+import com.hierynomus.smbj.event.handler.MessageIdCallback;
 import com.hierynomus.smbj.io.ArrayByteChunkProvider;
 import com.hierynomus.smbj.io.ByteChunkProvider;
 import com.hierynomus.smbj.io.EmptyByteChunkProvider;
@@ -137,6 +138,22 @@ public class Share implements AutoCloseable {
         );
         SMB2CreateResponse resp = sendReceive(cr, "Create", path, getCreateSuccessStatus(), transactTimeout);
         return resp;
+    }
+
+    Future<SMB2CreateResponse> createAsync(SmbPath path, SMB2OplockLevel oplockLevel, SMB2ImpersonationLevel impersonationLevel, Set<AccessMask> accessMask, Set<FileAttributes> fileAttributes, Set<SMB2ShareAccess> shareAccess, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions, MessageIdCallback messageIdCallback) {
+        SMB2CreateRequest cr = new SMB2CreateRequest(
+            dialect,
+            sessionId, treeId,
+            oplockLevel,
+            impersonationLevel,
+            accessMask,
+            fileAttributes,
+            shareAccess,
+            createDisposition,
+            createOptions,
+            path
+        );
+        return send(cr, messageIdCallback);
     }
 
     protected Set<NtStatus> getCreateSuccessStatus() {
@@ -357,12 +374,16 @@ public class Share implements AutoCloseable {
     }
 
     private <T extends SMB2Packet> Future<T> send(SMB2Packet request) {
+        return send(request, null);
+    }
+
+    private <T extends SMB2Packet> Future<T> send(SMB2Packet request, MessageIdCallback messageIdCallback) {
         if (!isConnected()) {
             throw new SMBRuntimeException(getClass().getSimpleName() + " has already been closed");
         }
 
         try {
-            return session.send(request);
+            return session.send(request, messageIdCallback);
         } catch (TransportException e) {
             throw new SMBRuntimeException(e);
         }

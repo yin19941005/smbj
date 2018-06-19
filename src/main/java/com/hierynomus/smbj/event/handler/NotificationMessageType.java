@@ -16,9 +16,10 @@
 package com.hierynomus.smbj.event.handler;
 
 /***
- * The enum class for determine which type of message is sending to OplockBreakNotificationHandler
+ * The enum class for determine which type of message is sending to NotificationHandler
  */
-public enum OplockBreakNotificationHandlerType {
+public enum NotificationMessageType {
+    SMB2_CREATE_REQUEST,
     SMB2_CREATE_RESPONSE,
     SMB2_OPLOCK_BREAK_NOTIFICATION
 }
