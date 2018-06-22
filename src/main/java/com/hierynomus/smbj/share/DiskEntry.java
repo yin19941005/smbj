@@ -56,6 +56,14 @@ public abstract class DiskEntry implements Closeable {
         share.closeFileId(fileId);
     }
 
+    public DiskShare getShare() {
+        return share;
+    }
+
+    public String getFileName() {
+        return fileName;
+    }
+
     public SMB2FileId getFileId() {
         return fileId;
     }
