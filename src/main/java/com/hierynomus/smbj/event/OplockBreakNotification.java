@@ -3,7 +3,10 @@ package com.hierynomus.smbj.event;
 import com.hierynomus.mssmb2.SMB2FileId;
 import com.hierynomus.mssmb2.SMB2OplockBreakLevel;
 
-public class OplockBreakNotification implements SMBEvent {
+/***
+ * Event for notifying the oplock break notification for corresponding fileId
+ */
+public class OplockBreakNotification implements SMBEvent, AsyncNotification {
 
     private SMB2OplockBreakLevel oplockLevel;
     private SMB2FileId fileId;
