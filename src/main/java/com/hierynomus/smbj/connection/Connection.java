@@ -36,9 +36,9 @@ import com.hierynomus.smbj.auth.AuthenticationContext;
 import com.hierynomus.smbj.auth.Authenticator;
 import com.hierynomus.smbj.common.SMBRuntimeException;
 import com.hierynomus.smbj.common.SmbPath;
-import com.hierynomus.smbj.event.AsyncCreateResponsePending;
+import com.hierynomus.smbj.event.AsyncCreateResponseNotification;
 import com.hierynomus.smbj.event.ConnectionClosed;
-import com.hierynomus.smbj.event.AsyncCreateRequestPending;
+import com.hierynomus.smbj.event.AsyncCreateRequestNotification;
 import com.hierynomus.smbj.event.OplockBreakNotification;
 import com.hierynomus.smbj.event.SMBEventBus;
 import com.hierynomus.smbj.event.SessionLoggedOff;
@@ -287,7 +287,7 @@ public class Connection implements Closeable, PacketReceiver<SMBPacket<?>> {
             if(packet instanceof SMB2CreateRequest) {
                 SMB2CreateRequest createRequest = (SMB2CreateRequest)packet;
                 SmbPath path = createRequest.getPath();
-                bus.publish(new AsyncCreateRequestPending(messageId, path));
+                bus.publish(new AsyncCreateRequestNotification(messageId, path));
             }
 
             Request request = new Request(messageId, UUID.randomUUID());
@@ -449,7 +449,7 @@ public class Connection implements Closeable, PacketReceiver<SMBPacket<?>> {
         if(packet instanceof SMB2CreateResponse) {
             SMB2CreateResponse smb2CreateResponse = (SMB2CreateResponse)packet;
             Future<SMB2CreateResponse> future = new FutureWrapper<>(outstandingRequests.getRequestByMessageId(messageId).getPromise().future());
-            bus.publish(new AsyncCreateResponsePending(messageId, smb2CreateResponse.getFileId(), future));
+            bus.publish(new AsyncCreateResponseNotification(messageId, smb2CreateResponse.getFileId(), future));
         }
 
         // [MS-SMB2].pdf 3.2.5.1.8 Processing the Response

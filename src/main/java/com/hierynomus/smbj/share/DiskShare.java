@@ -35,8 +35,8 @@ import com.hierynomus.smbj.SMBClient;
 import com.hierynomus.smbj.common.SMBRuntimeException;
 import com.hierynomus.smbj.common.SmbPath;
 import com.hierynomus.smbj.connection.Connection;
-import com.hierynomus.smbj.event.AsyncCreateResponsePending;
-import com.hierynomus.smbj.event.AsyncCreateRequestPending;
+import com.hierynomus.smbj.event.AsyncCreateResponseNotification;
+import com.hierynomus.smbj.event.AsyncCreateRequestNotification;
 import com.hierynomus.smbj.event.OplockBreakNotification;
 import com.hierynomus.smbj.event.SMBEventBus;
 import com.hierynomus.smbj.event.handler.MessageIdCallback;
@@ -563,11 +563,7 @@ public class DiskShare extends Share {
                     @Override
                     public void run() {
                         notificationHandler.handle(SMB2_OPLOCK_BREAK_NOTIFICATION,
-                                                   -1,
-                                                   fileId,
-                                                   null,
-                                                   null,
-                                                   oplockLevel);
+                                                   oplockBreakNotification);
                     }
                 });
             }else {
@@ -582,28 +578,29 @@ public class DiskShare extends Share {
     }
 
     /***
-     * Async create response handler.
+     * Async create request handler.
      *
-     * @param asyncCreateRequestPending filePath with the corresponding messageId.
+     * @param asyncCreateRequestNotification filePath with the corresponding messageId.
      */
     @Handler
     @SuppressWarnings("unused")
-    private void createRequestPending(final AsyncCreateRequestPending asyncCreateRequestPending) {
-        if(notificationHandler != null) {
-            // Preventing the improper use of handler (holding the thread). if holding thread, timeout exception will be throw.
-            notifyExecutor.submit(new Runnable() {
-                @Override
-                public void run() {
-                    notificationHandler.handle(SMB2_CREATE_REQUEST,
-                                               asyncCreateRequestPending.getMessageId(),
-                                               null,
-                                               asyncCreateRequestPending.getPath(),
-                                               null,
-                                               null);
-                }
-            });
-        }else {
-            logger.debug("NotificationHandler not exist to handle asyncCreateRequestPending");
+    private void createRequestNotification(final AsyncCreateRequestNotification asyncCreateRequestNotification) {
+        try {
+            if(notificationHandler != null) {
+                // Preventing the improper use of handler (holding the thread). if holding thread, timeout exception will be throw.
+                notifyExecutor.submit(new Runnable() {
+                    @Override
+                    public void run() {
+                        notificationHandler.handle(SMB2_CREATE_REQUEST,
+                                                   asyncCreateRequestNotification);
+                    }
+                });
+            }else {
+                logger.debug("NotificationHandler not exist to handle asyncCreateRequestNotification");
+            }
+        } catch (Throwable t) {
+            logger.error("Handling createRequestNotification error occur : ", t);
+            throw t;
         }
     }
 
@@ -613,29 +610,28 @@ public class DiskShare extends Share {
      * This is also intended to prevent oplock break too fast and not able to handle oplock break notification properly.
      * Notify the client oplock is granted on createResponse but still under processing.
      *
-     * @param asyncCreateResponsePending the corresponding messageId and fileId with the Future of createResponse.
+     * @param asyncCreateResponseNotification the corresponding messageId and fileId with the Future of createResponse.
      */
     @Handler
     @SuppressWarnings("unused")
-    private void createResponsePending(final AsyncCreateResponsePending asyncCreateResponsePending) {
-
-        if(notificationHandler != null) {
-            // Preventing the improper use of handler (holding the thread). if holding thread, timeout exception will be throw.
-            notifyExecutor.submit(new Runnable() {
-                @Override
-                public void run() {
-                    notificationHandler.handle(SMB2_CREATE_RESPONSE,
-                                               asyncCreateResponsePending.getMessageId(),
-                                               asyncCreateResponsePending.getFileId(),
-                                               null,
-                                               asyncCreateResponsePending.getFuture(),
-                                               null);
-                }
-            });
-        }else {
-            logger.debug("NotificationHandler not exist to handle asyncCreateResponsePending");
+    private void createResponseNotification(final AsyncCreateResponseNotification asyncCreateResponseNotification) {
+        try {
+            if(notificationHandler != null) {
+                // Preventing the improper use of handler (holding the thread). if holding thread, timeout exception will be throw.
+                notifyExecutor.submit(new Runnable() {
+                    @Override
+                    public void run() {
+                        notificationHandler.handle(SMB2_CREATE_RESPONSE,
+                                                   asyncCreateResponseNotification);
+                    }
+                });
+            }else {
+                logger.debug("NotificationHandler not exist to handle asyncCreateResponseNotification");
+            }
+        } catch (Throwable t) {
+            logger.error("Handling createResponseNotification error occur : ", t);
+            throw t;
         }
-
     }
 
     @Override

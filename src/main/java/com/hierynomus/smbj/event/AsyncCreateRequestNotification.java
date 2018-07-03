@@ -2,12 +2,15 @@ package com.hierynomus.smbj.event;
 
 import com.hierynomus.smbj.common.SmbPath;
 
-public class AsyncCreateRequestPending implements SMBEvent {
+/***
+ * Event for notifying the SmbPath to DiskShare Notification Handler
+ */
+public class AsyncCreateRequestNotification implements SMBEvent, AsyncNotification {
 
     private long messageId;
     private SmbPath path;
 
-    public AsyncCreateRequestPending(long messageId, SmbPath path) {
+    public AsyncCreateRequestNotification(long messageId, SmbPath path) {
         this.messageId = messageId;
         this.path = path;
     }
