@@ -29,6 +29,7 @@ import com.hierynomus.mssmb2.messages.SMB2SetInfoRequest;
 import com.hierynomus.protocol.commons.EnumWithValue;
 import com.hierynomus.protocol.commons.buffer.Buffer;
 import com.hierynomus.protocol.commons.buffer.Endian;
+import com.hierynomus.protocol.commons.concurrent.TaskQueue;
 import com.hierynomus.protocol.transport.TransportException;
 import com.hierynomus.smb.SMBBuffer;
 import com.hierynomus.smbj.SMBClient;
@@ -82,15 +83,9 @@ public class DiskShare extends Share {
     private SMBEventBus bus;
     private NotificationHandler notificationHandler = null;
 
-    private final ExecutorService notifyExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
-        @Override
-        public Thread newThread(Runnable r) {
-            Thread t = Executors.defaultThreadFactory().newThread(r);
-            t.setDaemon(true);
-            t.setName(smbPath.getShareName() + "-Thread-1");
-            return t;
-        }
-    });
+    private final ExecutorService notifyExecutor;
+    private final boolean isCreatedNotifyExecutor;
+    private final TaskQueue taskQueue = new TaskQueue();
 
     public DiskShare(SmbPath smbPath, TreeConnect treeConnect, PathResolver pathResolver, SMBEventBus bus) {
         super(smbPath, treeConnect);
@@ -99,13 +94,31 @@ public class DiskShare extends Share {
         if (bus != null) {
             bus.subscribe(this);
         }
+        ExecutorService executorFromConfig = treeConnect.getConnection().getConfig().getNotifyExecutorService();
+        if(executorFromConfig != null) {
+            notifyExecutor = executorFromConfig;
+            isCreatedNotifyExecutor = false;
+        } else {
+            notifyExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable r) {
+                    Thread t = Executors.defaultThreadFactory().newThread(r);
+                    t.setDaemon(true);
+                    t.setName(DiskShare.super.smbPath.getShareName() + "-Thread-1");
+                    return t;
+                }
+            });
+            isCreatedNotifyExecutor = true;
+        }
     }
 
     @Override
     public void close() throws IOException {
         super.close();
-        // cleanup for executor
-        notifyExecutor.shutdown();
+        if(isCreatedNotifyExecutor) {
+            // cleanup for executor
+            notifyExecutor.shutdown();
+        }
     }
 
     public DiskEntry open(String path, Set<AccessMask> accessMask, Set<FileAttributes> attributes, Set<SMB2ShareAccess> shareAccesses, SMB2CreateDisposition createDisposition, Set<SMB2CreateOptions> createOptions) {
@@ -559,13 +572,13 @@ public class DiskShare extends Share {
 
             if(notificationHandler != null) {
                 // Preventing the improper use of handler (holding the thread). if holding thread, timeout exception will be throw.
-                notifyExecutor.submit(new Runnable() {
+                taskQueue.execute(new Runnable() {
                     @Override
                     public void run() {
                         notificationHandler.handle(SMB2_OPLOCK_BREAK_NOTIFICATION,
                                                    oplockBreakNotification);
                     }
-                });
+                }, notifyExecutor);
             }else {
                 logger.warn("FileId {}, NotificationHandler not exist to handle Oplock Break.", fileId);
                 throw new IllegalStateException("NotificationHandler not exist to handle Oplock Break.");
@@ -588,13 +601,13 @@ public class DiskShare extends Share {
         try {
             if(notificationHandler != null) {
                 // Preventing the improper use of handler (holding the thread). if holding thread, timeout exception will be throw.
-                notifyExecutor.submit(new Runnable() {
+                taskQueue.execute(new Runnable() {
                     @Override
                     public void run() {
                         notificationHandler.handle(SMB2_CREATE_REQUEST,
                                                    asyncCreateRequestNotification);
                     }
-                });
+                }, notifyExecutor);
             }else {
                 logger.debug("NotificationHandler not exist to handle asyncCreateRequestNotification");
             }
@@ -618,13 +631,13 @@ public class DiskShare extends Share {
         try {
             if(notificationHandler != null) {
                 // Preventing the improper use of handler (holding the thread). if holding thread, timeout exception will be throw.
-                notifyExecutor.submit(new Runnable() {
+                taskQueue.execute(new Runnable() {
                     @Override
                     public void run() {
                         notificationHandler.handle(SMB2_CREATE_RESPONSE,
                                                    asyncCreateResponseNotification);
                     }
-                });
+                }, notifyExecutor);
             }else {
                 logger.debug("NotificationHandler not exist to handle asyncCreateResponseNotification");
             }
